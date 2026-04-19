@@ -59,6 +59,8 @@ export BASE_WORKTREE="$HOME/worktrees"
 
 ## Usage
 
+Note: actual name here depends on the shell integration step. E.g. If you've named it `gw` then all commands below should be `gw` instead of `gwork`.
+
 ```bash
 gwork main
 gwork feature/foo
