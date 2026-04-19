@@ -1,11 +1,11 @@
-gw() {
+gwork() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gw --help
+    command gwork --help
     return $?
   fi
 
   local path rc
-  path="$(command gw "$@")"
+  path="$(command gwork "$@")"
   rc=$?
 
   if (( rc != 0 )); then
@@ -21,6 +21,7 @@ _gw_complete() {
   if [[ "$PREFIX" == -* ]]; then
     local -a flags=(
       '--print-shell-integration:print shell helper script'
+      '--install-shell-integration:append shell integration to your shell rc file'
       '-new:open worktree in a new iTerm2 tab/window/split pane'
       '-b:create new branch and worktree'
       '-base:update base branch before creating a new branch'
@@ -51,6 +52,6 @@ _gw_complete() {
   _describe 'branch' branches
 }
 
-compdef _gw_complete gw
-compdef _gw_complete git-gw
-_git_gw() { _gw_complete "$@"; }
+compdef _gw_complete gwork
+compdef _gw_complete git-gwork
+_git_gwork() { _gw_complete "$@"; }

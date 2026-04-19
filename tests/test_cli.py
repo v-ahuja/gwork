@@ -42,8 +42,8 @@ def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProces
 
 def init_repo(path: Path, default_branch: str = "main") -> None:
     git(path.parent, "init", "--initial-branch", default_branch, str(path))
-    git(path, "config", "user.name", "gw tests")
-    git(path, "config", "user.email", "gw@example.com")
+    git(path, "config", "user.name", "gwork tests")
+    git(path, "config", "user.email", "gwork@example.com")
     (path / "README.md").write_text("hello\n", encoding="utf-8")
     git(path, "add", "README.md")
     git(path, "commit", "-m", "initial")
@@ -66,7 +66,7 @@ class GwCliTests(unittest.TestCase):
             repo = tmp_path / "repo"
             init_repo(repo)
 
-            result = run_gw(["main"], repo)
+            result = run_gw(["main"], repo, env={"BASE_WORKTREE": ""})
 
             self.assertEqual(result.returncode, 1)
             self.assertIn("BASE_WORKTREE is not set", result.stderr)
@@ -155,8 +155,87 @@ class GwCliTests(unittest.TestCase):
             result = run_gw(["--print-shell-integration", "zsh"], tmp_path)
 
             self.assertEqual(result.returncode, 0)
-            self.assertIn("compdef _gw_complete gw", result.stdout)
+            self.assertIn("compdef _gw_complete gwork", result.stdout)
             self.assertEqual(result.stderr, "")
+
+    def test_help_mentions_shell_integration_install_and_print(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--help"], tmp_path)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("gwork --install-shell-integration [zsh|bash]", result.stdout)
+            self.assertIn("gwork --print-shell-integration [zsh|bash]", result.stdout)
+
+    def test_print_shell_integration_can_infer_zsh_from_shell_env(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration"], tmp_path, env={"SHELL": "/bin/zsh"})
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("compdef _gw_complete gwork", result.stdout)
+            self.assertEqual(result.stderr, "")
+
+    def test_print_shell_integration_requires_supported_shell_when_not_provided(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration"], tmp_path, env={"SHELL": "/bin/fish"})
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("could not infer shell from $SHELL", result.stderr)
+
+    def test_install_shell_integration_appends_managed_block_to_zshrc(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+            zshrc = home / ".zshrc"
+            zshrc.write_text("export BASE_WORKTREE=\"$HOME/worktrees\"\n", encoding="utf-8")
+
+            result = run_gw(
+                ["--install-shell-integration", "zsh"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/zsh"},
+            )
+
+            content = zshrc.read_text(encoding="utf-8")
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("installed shell integration", result.stderr)
+            self.assertIn("# >>> gwork shell integration >>>", content)
+            self.assertIn("gwork() {", content)
+            self.assertTrue(content.startswith("export BASE_WORKTREE"))
+
+    def test_install_shell_integration_is_idempotent(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+
+            first = run_gw(
+                ["--install-shell-integration", "zsh"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/zsh"},
+            )
+            second = run_gw(
+                ["--install-shell-integration", "zsh"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/zsh"},
+            )
+
+            content = (home / ".zshrc").read_text(encoding="utf-8")
+            self.assertEqual(first.returncode, 0)
+            self.assertEqual(second.returncode, 0)
+            self.assertEqual(content.count("# >>> gwork shell integration >>>"), 1)
+
+    def test_install_shell_integration_requires_supported_shell_when_not_provided(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+
+            result = run_gw(
+                ["--install-shell-integration"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/fish"},
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("could not infer shell from $SHELL", result.stderr)
 
     def test_base_branch_mode_prunes_gone_branches(self) -> None:
         with tempfile_dir() as tmp_path:
@@ -251,7 +330,7 @@ class GwCliTests(unittest.TestCase):
             (repo / ".gw" / "includes" / "manual_includes").write_text(".env\n", encoding="utf-8")
             (repo / ".gw" / "config").write_text("data\n", encoding="utf-8")
             git(repo, "add", ".gitignore")
-            git(repo, "commit", "-m", "add gw config")
+            git(repo, "commit", "-m", "add gwork config")
 
             result = run_gw(["-b", "feature/includes"], repo, env={"BASE_WORKTREE": str(base)})
             target = Path(result.stdout.strip())
@@ -298,7 +377,7 @@ class GwCliTests(unittest.TestCase):
             mock.patch.object(cli.shutil, "which", return_value="/usr/bin/osascript"), \
             mock.patch.object(cli.sys, "platform", "darwin"), \
             mock.patch.object(cli.subprocess, "run", side_effect=fake_run):
-            exit_code = cli.run(["-new", "tab", "main"], prog_name="gw")
+            exit_code = cli.run(["-new", "tab", "main"], prog_name="gwork")
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(calls[0][0], "osascript")

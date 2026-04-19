@@ -1,6 +1,6 @@
-# gw
+# gwork
 
-`gw` is a small Git worktree helper for the flows that happen all day in active repositories:
+`gwork` is a small Git worktree helper for the flows that happen all day in active repositories:
 
 - jump into an existing branch worktree
 - create a new branch in its own worktree
@@ -14,14 +14,14 @@ The core CLI works anywhere Git and Python 3.10+ work. The `-new` flag is an opt
 ### PyPI
 
 ```bash
-pipx install gw
-uv tool install gw
+pipx install gwork
+uv tool install gwork
 ```
 
 Transient execution is also supported:
 
 ```bash
-uvx gw --help
+uvx gwork --help
 ```
 
 ### From GitHub
@@ -29,49 +29,57 @@ uvx gw --help
 ```bash
 pipx install git+https://github.com/v-ahuja/gw.git
 uv tool install git+https://github.com/v-ahuja/gw.git
-uvx --from git+https://github.com/v-ahuja/gw.git gw --help
+uvx --from git+https://github.com/v-ahuja/gw.git gwork --help
 ```
 
 ## Required setup
 
-Create a directory where `gw` can place per-repo worktrees and export it in your shell startup:
+Create a directory where `gwork` can place per-repo worktrees and export it in your shell startup:
 
 ```bash
 mkdir -p "$HOME/worktrees"
 export BASE_WORKTREE="$HOME/worktrees"
 ```
 
-`BASE_WORKTREE` is required. `gw` organizes worktrees under it by repository name.
+`BASE_WORKTREE` is required. `gwork` organizes worktrees under it by repository name.
 
 ## Usage
 
 ```bash
-gw main
-gw feature/foo
-gw -b feature/new-thing
-gw -base main -b feature/from-main
-gw -d feature/old-thing
-gw -D feature/broken-thing
-git gw feature/foo
+gwork main
+gwork feature/foo
+gwork -b feature/new-thing
+gwork -base main -b feature/from-main
+gwork -d feature/old-thing
+gwork -D feature/broken-thing
+git gwork feature/foo
 ```
 
 Successful checkout and branch-creation commands print the absolute worktree path to stdout. That makes the plain CLI useful in scripts and also lets the shell helper `cd` automatically.
 
 ### Shell integration
 
-The CLI itself cannot change your current shell directory. If you want `gw` to drop you directly into the returned worktree, source the generated helper:
+The CLI itself cannot change your current shell directory. If you want `gwork` to drop you directly into the returned worktree, source the generated helper:
 
 ```bash
-source <(gw --print-shell-integration zsh)
-# or
-source <(gw --print-shell-integration bash)
+gwork --install-shell-integration
+# or explicitly
+gwork --install-shell-integration zsh
+gwork --install-shell-integration bash
+
+# manual sourcing still works
+source <(gwork --print-shell-integration)
+source <(gwork --print-shell-integration zsh)
+source <(gwork --print-shell-integration bash)
 ```
+
+`--install-shell-integration` appends a managed block to `~/.zshrc` or `~/.bashrc` and can infer the shell from `$SHELL`.
 
 The helper:
 
-- runs the `gw` CLI
+- runs the `gwork` CLI
 - captures the printed worktree path
-- changes the current shell directory when appropriate
+- changes your current shell directory into the resolved worktree after switching to one or creating a new one
 - enables completion
 
 The repository also includes checked-in copies under `contrib/` for users who prefer to source a file directly.
@@ -82,7 +90,7 @@ The repository also includes checked-in copies under `contrib/` for users who pr
 
 ## Manual includes
 
-If the repository root contains `.gw/includes/manual_includes`, `gw` copies the `.gw/` directory and any files matching those patterns into newly created worktrees. This is useful for local ignored files such as `.env`, `*.local`, or `config/.env.*`.
+If the repository root contains `.gw/includes/manual_includes`, `gwork` copies the `.gw/` directory and any files matching those patterns into newly created worktrees. This is useful for local ignored files such as `.env`, `*.local`, or `config/.env.*`.
 
 Patterns use shell-style globs. Git-ignored directories are pruned while scanning so large ignored trees like `node_modules/` are skipped.
 

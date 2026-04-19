@@ -1,4 +1,4 @@
-"""CLI implementation for gw."""
+"""CLI implementation for gwork."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class NewMode(enum.Enum):
 
 
 class GwError(RuntimeError):
-    """Raised for user-facing gw failures."""
+    """Raised for user-facing gwork failures."""
 
 
 ITERM_SCRIPTS: dict[NewMode, str] = {
@@ -64,14 +64,14 @@ end tell
 """,
 }
 
-ZSH_INTEGRATION = """gw() {
+ZSH_INTEGRATION = """gwork() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gw --help
+    command gwork --help
     return $?
   fi
 
   local path rc
-  path="$(command gw "$@")"
+  path="$(command gwork "$@")"
   rc=$?
 
   if (( rc != 0 )); then
@@ -87,6 +87,7 @@ _gw_complete() {
   if [[ "$PREFIX" == -* ]]; then
     local -a flags=(
       '--print-shell-integration:print shell helper script'
+      '--install-shell-integration:append shell integration to your shell rc file'
       '-new:open worktree in a new iTerm2 tab/window/split pane'
       '-b:create new branch and worktree'
       '-base:update base branch before creating a new branch'
@@ -117,19 +118,19 @@ _gw_complete() {
   _describe 'branch' branches
 }
 
-compdef _gw_complete gw
-compdef _gw_complete git-gw
-_git_gw() { _gw_complete "$@"; }
+compdef _gw_complete gwork
+compdef _gw_complete git-gwork
+_git_gwork() { _gw_complete "$@"; }
 """
 
-BASH_INTEGRATION = """gw() {
+BASH_INTEGRATION = """gwork() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gw --help
+    command gwork --help
     return $?
   fi
 
   local path rc
-  path="$(command gw "$@")"
+  path="$(command gwork "$@")"
   rc=$?
 
   if [[ $rc -ne 0 ]]; then
@@ -146,7 +147,7 @@ _gw_complete() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--print-shell-integration -new -b -base -d -D" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration -new -b -base -d -D" -- "$cur") )
     return
   fi
 
@@ -156,13 +157,25 @@ _gw_complete() {
   COMPREPLY=( $(compgen -W "co ${local_branches} ${remote_branches}" -- "$cur") )
 }
 
-complete -F _gw_complete gw
-complete -F _gw_complete git-gw
+complete -F _gw_complete gwork
+complete -F _gw_complete git-gwork
 """
+
+SHELL_RC_FILES = {
+    "zsh": ".zshrc",
+    "bash": ".bashrc",
+}
+
+INSTALL_MARKER_START = "# >>> gwork shell integration >>>"
+INSTALL_MARKER_END = "# <<< gwork shell integration <<<"
 
 
 def err(message: str) -> None:
     print(message, file=sys.stderr)
+
+
+def integration_script_for(shell: str) -> str:
+    return ZSH_INTEGRATION if shell == "zsh" else BASH_INTEGRATION
 
 
 def git(*args: str, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -218,7 +231,7 @@ def copy_manual_includes(main_root: str, target: str) -> None:
         if os.path.exists(gw_dst):
             shutil.rmtree(gw_dst)
         shutil.copytree(gw_src, gw_dst)
-        err("gw: copied .gw/")
+        err("gwork: copied .gw/")
 
     includes_file = os.path.join(main_root, ".gw", "includes", "manual_includes")
     if not os.path.isfile(includes_file):
@@ -269,7 +282,7 @@ def copy_manual_includes(main_root: str, target: str) -> None:
                 copied += 1
 
     if copied > 0:
-        err(f"gw: copied {copied} file(s) from .gw/includes/manual_includes")
+        err(f"gwork: copied {copied} file(s) from .gw/includes/manual_includes")
 
 
 def open_iterm(path: str, mode: NewMode) -> None:
@@ -295,7 +308,7 @@ def get_repo_info() -> tuple[str, str, str | None]:
     base_worktree = os.environ.get("BASE_WORKTREE", "")
     if not base_worktree:
         raise GwError(
-            "gw: BASE_WORKTREE is not set.\n\n"
+            "gwork: BASE_WORKTREE is not set.\n\n"
             "Create a base directory for worktrees and export it in your shell config:\n\n"
             '  mkdir -p "$HOME/worktrees"\n'
             '  export BASE_WORKTREE="$HOME/worktrees"\n'
@@ -303,12 +316,12 @@ def get_repo_info() -> tuple[str, str, str | None]:
 
     if not os.path.isdir(base_worktree):
         raise GwError(
-            f"gw: BASE_WORKTREE '{base_worktree}' does not exist. Create it first:\n"
+            f"gwork: BASE_WORKTREE '{base_worktree}' does not exist. Create it first:\n"
             f'  mkdir -p "{base_worktree}"'
         )
 
     if not git_check("rev-parse", "--is-inside-work-tree"):
-        raise GwError("gw: not inside a git repo.")
+        raise GwError("gwork: not inside a git repo.")
 
     common_dir = git_output("rev-parse", "--path-format=absolute", "--git-common-dir")
     if os.path.basename(common_dir) == ".git":
@@ -331,14 +344,14 @@ def update_base_branch(base: str, main_worktree_root: str | None) -> None:
     if not worktree_path:
         remote_check = git("branch", "-r", "--list", f"*/{base}", capture=True, check=True)
         if not git_check("show-ref", "--verify", "--quiet", f"refs/heads/{base}") and not remote_check.stdout.strip():
-            raise GwError(f"gw: base branch '{base}' not found")
+            raise GwError(f"gwork: base branch '{base}' not found")
         if main_worktree_root:
             git("-C", main_worktree_root, "checkout", base, capture=True)
             worktree_path = main_worktree_root
         else:
-            raise GwError(f"gw: base branch '{base}' has no worktree and no main worktree is available")
+            raise GwError(f"gwork: base branch '{base}' has no worktree and no main worktree is available")
 
-    err("gw: cleaning up gone branches...")
+    err("gwork: cleaning up gone branches...")
     git("fetch", "--prune", capture=True)
     result = git("branch", "-vv", capture=True, check=True)
     for line in result.stdout.splitlines():
@@ -349,7 +362,7 @@ def update_base_branch(base: str, main_worktree_root: str | None) -> None:
             stripped = stripped[2:]
         branch_name = stripped.split()[0]
         git("branch", "-D", branch_name, capture=True, check=False)
-        err(f"gw: deleted gone branch '{branch_name}'")
+        err(f"gwork: deleted gone branch '{branch_name}'")
 
 
 def do_delete(branch: str, force: bool) -> None:
@@ -357,7 +370,7 @@ def do_delete(branch: str, force: bool) -> None:
     branch_exists = git_check("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
 
     if not worktree_path and not branch_exists:
-        raise GwError(f"gw: branch '{branch}' not found")
+        raise GwError(f"gwork: branch '{branch}' not found")
 
     if not force and branch_exists:
         result = git("branch", "-d", branch, capture=True, check=False)
@@ -366,7 +379,7 @@ def do_delete(branch: str, force: bool) -> None:
             if "used by worktree" in stderr:
                 merged = git("merge-base", "--is-ancestor", branch, "HEAD", check=False)
                 if merged.returncode != 0:
-                    raise GwError(f"gw: branch '{branch}' is not fully merged (use -D to force)")
+                    raise GwError(f"gwork: branch '{branch}' is not fully merged (use -D to force)")
             else:
                 raise GwError(stderr.rstrip())
         else:
@@ -377,7 +390,7 @@ def do_delete(branch: str, force: bool) -> None:
             git("worktree", "remove", "--force", worktree_path)
         else:
             git("worktree", "remove", worktree_path)
-        err(f"gw: removed worktree '{worktree_path}'")
+        err(f"gwork: removed worktree '{worktree_path}'")
 
     if branch_exists:
         if force:
@@ -398,7 +411,7 @@ def do_create_branch(
         return emit_path(existing, new_mode)
 
     if git_check("show-ref", "--verify", "--quiet", f"refs/heads/{new_branch}"):
-        raise GwError(f"gw: branch '{new_branch}' already exists (use gw '{new_branch}')")
+        raise GwError(f"gwork: branch '{new_branch}' already exists (use gwork '{new_branch}')")
 
     target_path = target_dir_for(new_branch, repo_base)
     if base:
@@ -441,30 +454,44 @@ def do_checkout_ref(
         git("worktree", "add", target_path, ref, capture=True)
         return finish_new_worktree(target_path, main_worktree_root, new_mode)
 
-    raise GwError(f"gw: error: pathspec '{ref}' did not match any branch or ref")
+    raise GwError(f"gwork: error: pathspec '{ref}' did not match any branch or ref")
 
 
-def build_parser(prog_name: str = "gw") -> argparse.ArgumentParser:
+def build_parser(prog_name: str = "gwork") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog_name,
         description="Git worktree helper.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Behavior:
-  gw [-new {tab,window,split-h,split-v}] <branch-or-ref>
-  gw [-new {tab,window,split-h,split-v}] [-base <branch>] -b <new-branch>
-  gw -d <branch>
-  gw -D <branch>
+  gwork [-new {tab,window,split-h,split-v}] <branch-or-ref>
+  gwork [-new {tab,window,split-h,split-v}] [-base <branch>] -b <new-branch>
+  gwork -d <branch>
+  gwork -D <branch>
 
 Notes:
   Successful checkout/create operations print the worktree path to stdout.
-  The optional shell helpers in contrib/ can use that path to cd automatically.
+  Shell integration uses that path to change your current shell into the
+  resolved worktree after switching to a worktree or creating a new one.
+
+Shell integration:
+  gwork --install-shell-integration [zsh|bash]
+  gwork --print-shell-integration [zsh|bash]
 """,
     )
     parser.add_argument(
         "--print-shell-integration",
-        choices=["zsh", "bash"],
-        help="print the shell helper for the selected shell",
+        nargs="?",
+        const="auto",
+        metavar="SHELL",
+        help="print the shell helper for zsh/bash, or infer it from $SHELL when omitted",
+    )
+    parser.add_argument(
+        "--install-shell-integration",
+        nargs="?",
+        const="auto",
+        metavar="SHELL",
+        help="append shell integration to ~/.zshrc or ~/.bashrc, inferring the shell when omitted",
     )
     parser.add_argument(
         "-new",
@@ -492,9 +519,9 @@ def validate_new_mode(new_mode: NewMode | None) -> None:
     if not new_mode:
         return
     if sys.platform != "darwin":
-        raise GwError("gw: -new requires macOS (osascript)")
+        raise GwError("gwork: -new requires macOS (osascript)")
     if shutil.which("osascript") is None:
-        raise GwError("gw: -new requires osascript (not found in PATH)")
+        raise GwError("gwork: -new requires osascript (not found in PATH)")
     result = subprocess.run(
         ["osascript", "-e", 'tell application "System Events" to get name of every process'],
         capture_output=True,
@@ -502,7 +529,57 @@ def validate_new_mode(new_mode: NewMode | None) -> None:
         check=False,
     )
     if "iTerm2" not in (result.stdout or ""):
-        raise GwError("gw: -new requires iTerm2 to be running")
+        raise GwError("gwork: -new requires iTerm2 to be running")
+
+
+def resolve_integration_shell(value: str) -> str:
+    if value in {"zsh", "bash"}:
+        return value
+    if value != "auto":
+        raise GwError(f"gwork: unsupported shell integration target '{value}' (expected zsh or bash)")
+
+    shell = Path(os.environ.get("SHELL", "")).name
+    if shell in {"zsh", "bash"}:
+        return shell
+
+    raise GwError("gwork: could not infer shell from $SHELL (specify 'zsh' or 'bash')")
+
+
+def install_shell_integration(shell: str) -> None:
+    rc_path = Path.home() / SHELL_RC_FILES[shell]
+    block = "\n".join(
+        [
+            INSTALL_MARKER_START,
+            "# Managed by gwork.",
+            integration_script_for(shell).rstrip(),
+            INSTALL_MARKER_END,
+            "",
+        ]
+    )
+
+    existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
+    kept_lines: list[str] = []
+    in_managed_block = False
+
+    for line in existing.splitlines():
+        if line == INSTALL_MARKER_START:
+            in_managed_block = True
+            continue
+        if line == INSTALL_MARKER_END:
+            in_managed_block = False
+            continue
+        if not in_managed_block:
+            kept_lines.append(line)
+
+    content = "\n".join(kept_lines).rstrip()
+    if content:
+        content = f"{content}\n\n{block}"
+    else:
+        content = block
+
+    rc_path.write_text(content, encoding="utf-8")
+    err(f"gwork: installed shell integration in '{rc_path}'")
+    err(f"gwork: run 'source {rc_path}' or open a new {shell} session")
 
 
 def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
@@ -510,13 +587,19 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
     if argv and argv[0] == "co":
         argv.pop(0)
 
-    program = prog_name or Path(sys.argv[0]).name or "gw"
+    program = prog_name or Path(sys.argv[0]).name or "gwork"
     parser = build_parser(program)
     args = parser.parse_args(argv)
 
     try:
         if args.print_shell_integration:
-            print(ZSH_INTEGRATION if args.print_shell_integration == "zsh" else BASH_INTEGRATION, end="")
+            shell = resolve_integration_shell(args.print_shell_integration)
+            print(integration_script_for(shell), end="")
+            return 0
+
+        if args.install_shell_integration:
+            shell = resolve_integration_shell(args.install_shell_integration)
+            install_shell_integration(shell)
             return 0
 
         if not any((args.create, args.delete, args.force_delete, args.ref)):
@@ -528,7 +611,7 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
         validate_new_mode(new_mode)
 
         if args.base and not args.create:
-            raise GwError("gw: -base can only be used with -b")
+            raise GwError("gwork: -base can only be used with -b")
 
         output = ""
         if args.delete:
@@ -546,7 +629,7 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
         return 1
     except subprocess.CalledProcessError as exc:
         message = (exc.stderr or exc.stdout or "").strip()
-        err(message if message else f"gw: git command failed: {' '.join(exc.cmd)}")
+        err(message if message else f"gwork: git command failed: {' '.join(exc.cmd)}")
         return 1
 
     if output:

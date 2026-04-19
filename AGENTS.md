@@ -62,7 +62,7 @@ These helpers:
 - `cd` into that path on success
 - install completion for `gw` and `git-gw`
 
-Checked-in copies also exist under [contrib/gw.zsh](/Users/vina/software/config_test/gw/contrib/gw.zsh) and [contrib/gw.bash](/Users/vina/software/config_test/gw/contrib/gw.bash), but installed-package users should prefer `--print-shell-integration`.
+Checked-in copies also exist under [contrib/gwork.zsh](/Users/vina/software/gw/contrib/gwork.zsh) and [contrib/gwork.bash](/Users/vina/software/gw/contrib/gwork.bash), but installed-package users should prefer `--print-shell-integration`.
 
 ## macOS-specific behavior
 

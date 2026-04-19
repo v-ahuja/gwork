@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gw"
+name = "gwork"
 version = "0.1.0"
 description = "Git worktree helper with optional shell integration"
 readme = "README.md"
@@ -35,8 +35,8 @@ Repository = "https://github.com/v-ahuja/gw"
 Issues = "https://github.com/v-ahuja/gw/issues"
 
 [project.scripts]
-gw = "gw.cli:main"
-git-gw = "gw.cli:main"
+gwork = "gw.cli:main"
+git-gwork = "gw.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
