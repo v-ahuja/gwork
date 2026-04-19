@@ -13,27 +13,6 @@ Also check out https://worktrunk.dev/, for more / slightly different worktree ma
 
 ## Install
 
-### PyPI
-
-```bash
-pipx install gwork
-uv tool install gwork
-```
-
-Highly recommended next step after `uv tool install`:
-
-```bash
-gwork --install-shell-integration
-```
-
-That installs the `gw` shell helper so `gw <branch>` can switch worktrees and immediately `cd` into the result. Without shell integration, `gwork` still works, but it only prints the resolved path.
-
-Transient execution is also supported:
-
-```bash
-uvx gwork --help
-```
-
 ### From GitHub
 
 ```bash
@@ -47,6 +26,8 @@ Highly recommended next step after `uv tool install`:
 ```bash
 gwork --install-shell-integration
 ```
+
+That installs the `gw` shell helper so `gw <branch>` can switch worktrees and immediately `cd` into the result. Without shell integration, `gwork` still works, but it only prints the resolved path.
 
 ## Required setup
 
@@ -81,7 +62,7 @@ The CLI itself cannot change your current shell directory. If you want `gwork` t
 
 ```bash
 gwork --install-shell-integration
-gwork --install-shell-integration gw
+gwork --install-shell-integration gw # if you want to name the shell integration `gw` instead. shorter and easier.
 gwork --install-shell-integration gwork
 
 # manual sourcing still works
