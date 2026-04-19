@@ -1,4 +1,4 @@
-gwork() {
+gw() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     command gwork --help
     return $?
@@ -22,7 +22,7 @@ _gw_complete() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration -new -b -base -d -D" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration --shell-integration-alias -new -b -base -d -D" -- "$cur") )
     return
   fi
 
@@ -32,5 +32,6 @@ _gw_complete() {
   COMPREPLY=( $(compgen -W "co ${local_branches} ${remote_branches}" -- "$cur") )
 }
 
+complete -F _gw_complete gw
 complete -F _gw_complete gwork
 complete -F _gw_complete git-gwork

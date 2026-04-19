@@ -17,7 +17,12 @@ ENV = {
 }
 
 
-def run_gw(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_gw(
+    args: list[str],
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
     merged_env = dict(ENV)
     if env:
         merged_env.update(env)
@@ -27,6 +32,7 @@ def run_gw(args: list[str], cwd: Path, env: dict[str, str] | None = None) -> sub
         env=merged_env,
         text=True,
         capture_output=True,
+        input=input_text,
     )
 
 
@@ -155,7 +161,9 @@ class GwCliTests(unittest.TestCase):
             result = run_gw(["--print-shell-integration", "zsh"], tmp_path)
 
             self.assertEqual(result.returncode, 0)
+            self.assertIn("gw() {", result.stdout)
             self.assertIn("compdef _gw_complete gwork", result.stdout)
+            self.assertIn("compdef _gw_complete gw", result.stdout)
             self.assertEqual(result.stderr, "")
 
     def test_help_mentions_shell_integration_install_and_print(self) -> None:
@@ -163,15 +171,30 @@ class GwCliTests(unittest.TestCase):
             result = run_gw(["--help"], tmp_path)
 
             self.assertEqual(result.returncode, 0)
-            self.assertIn("gwork --install-shell-integration [zsh|bash]", result.stdout)
+            self.assertIn("gwork --install-shell-integration gw", result.stdout)
+            self.assertIn("prompt interactively", result.stdout)
             self.assertIn("gwork --print-shell-integration [zsh|bash]", result.stdout)
+            self.assertIn("--shell-integration-alias NAME", result.stdout)
 
     def test_print_shell_integration_can_infer_zsh_from_shell_env(self) -> None:
         with tempfile_dir() as tmp_path:
             result = run_gw(["--print-shell-integration"], tmp_path, env={"SHELL": "/bin/zsh"})
 
             self.assertEqual(result.returncode, 0)
+            self.assertIn("gw() {", result.stdout)
             self.assertIn("compdef _gw_complete gwork", result.stdout)
+            self.assertEqual(result.stderr, "")
+
+    def test_print_shell_integration_can_override_alias(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(
+                ["--print-shell-integration", "zsh", "--shell-integration-alias", "gwork"],
+                tmp_path,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("gwork() {", result.stdout)
+            self.assertNotIn("gw() {", result.stdout)
             self.assertEqual(result.stderr, "")
 
     def test_print_shell_integration_requires_supported_shell_when_not_provided(self) -> None:
@@ -181,6 +204,16 @@ class GwCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("could not infer shell from $SHELL", result.stderr)
 
+    def test_print_shell_integration_rejects_invalid_alias(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(
+                ["--print-shell-integration", "zsh", "--shell-integration-alias", "git-gw"],
+                tmp_path,
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("unsupported shell integration alias", result.stderr)
+
     def test_install_shell_integration_appends_managed_block_to_zshrc(self) -> None:
         with tempfile_dir() as tmp_path:
             home = tmp_path / "home"
@@ -189,7 +222,7 @@ class GwCliTests(unittest.TestCase):
             zshrc.write_text("export BASE_WORKTREE=\"$HOME/worktrees\"\n", encoding="utf-8")
 
             result = run_gw(
-                ["--install-shell-integration", "zsh"],
+                ["--install-shell-integration", "gw"],
                 tmp_path,
                 env={"HOME": str(home), "SHELL": "/bin/zsh"},
             )
@@ -199,8 +232,25 @@ class GwCliTests(unittest.TestCase):
             self.assertEqual(result.stdout, "")
             self.assertIn("installed shell integration", result.stderr)
             self.assertIn("# >>> gwork shell integration >>>", content)
-            self.assertIn("gwork() {", content)
+            self.assertIn("gw() {", content)
+            self.assertIn("command gwork", content)
             self.assertTrue(content.startswith("export BASE_WORKTREE"))
+
+    def test_install_shell_integration_can_override_alias(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+
+            result = run_gw(
+                ["--install-shell-integration", "gwork"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/zsh"},
+            )
+
+            content = (home / ".zshrc").read_text(encoding="utf-8")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("gwork() {", content)
+            self.assertNotIn("gw() {", content)
 
     def test_install_shell_integration_is_idempotent(self) -> None:
         with tempfile_dir() as tmp_path:
@@ -208,12 +258,12 @@ class GwCliTests(unittest.TestCase):
             home.mkdir()
 
             first = run_gw(
-                ["--install-shell-integration", "zsh"],
+                ["--install-shell-integration", "gw"],
                 tmp_path,
                 env={"HOME": str(home), "SHELL": "/bin/zsh"},
             )
             second = run_gw(
-                ["--install-shell-integration", "zsh"],
+                ["--install-shell-integration", "gw"],
                 tmp_path,
                 env={"HOME": str(home), "SHELL": "/bin/zsh"},
             )
@@ -223,13 +273,49 @@ class GwCliTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0)
             self.assertEqual(content.count("# >>> gwork shell integration >>>"), 1)
 
-    def test_install_shell_integration_requires_supported_shell_when_not_provided(self) -> None:
+    def test_install_shell_integration_prompts_and_defaults_to_gw(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+            zshrc = home / ".zshrc"
+
+            result = run_gw(
+                ["--install-shell-integration"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/zsh"},
+                input_text="\n",
+            )
+
+            content = zshrc.read_text(encoding="utf-8")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("alias [gw]", result.stdout)
+            self.assertIn("gw() {", content)
+
+    def test_install_shell_integration_prompts_for_custom_alias(self) -> None:
         with tempfile_dir() as tmp_path:
             home = tmp_path / "home"
             home.mkdir()
 
             result = run_gw(
                 ["--install-shell-integration"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/bin/zsh"},
+                input_text="gwork\n",
+            )
+
+            content = (home / ".zshrc").read_text(encoding="utf-8")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("alias [gw]", result.stdout)
+            self.assertIn("gwork() {", content)
+            self.assertNotIn("gw() {", content)
+
+    def test_install_shell_integration_requires_supported_shell_env(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+
+            result = run_gw(
+                ["--install-shell-integration", "gw"],
                 tmp_path,
                 env={"HOME": str(home), "SHELL": "/bin/fish"},
             )

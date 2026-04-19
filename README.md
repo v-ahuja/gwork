@@ -18,6 +18,14 @@ pipx install gwork
 uv tool install gwork
 ```
 
+Highly recommended next step after `uv tool install`:
+
+```bash
+gwork --install-shell-integration
+```
+
+That installs the `gw` shell helper so `gw <branch>` can switch worktrees and immediately `cd` into the result. Without shell integration, `gwork` still works, but it only prints the resolved path.
+
 Transient execution is also supported:
 
 ```bash
@@ -30,6 +38,12 @@ uvx gwork --help
 pipx install git+https://github.com/v-ahuja/gw.git
 uv tool install git+https://github.com/v-ahuja/gw.git
 uvx --from git+https://github.com/v-ahuja/gw.git gwork --help
+```
+
+Highly recommended next step after `uv tool install`:
+
+```bash
+gwork --install-shell-integration
 ```
 
 ## Required setup
@@ -63,17 +77,17 @@ The CLI itself cannot change your current shell directory. If you want `gwork` t
 
 ```bash
 gwork --install-shell-integration
-# or explicitly
-gwork --install-shell-integration zsh
-gwork --install-shell-integration bash
+gwork --install-shell-integration gw
+gwork --install-shell-integration gwork
 
 # manual sourcing still works
 source <(gwork --print-shell-integration)
 source <(gwork --print-shell-integration zsh)
 source <(gwork --print-shell-integration bash)
+source <(gwork --print-shell-integration zsh --shell-integration-alias gwork)
 ```
 
-`--install-shell-integration` appends a managed block to `~/.zshrc` or `~/.bashrc` and can infer the shell from `$SHELL`.
+`--install-shell-integration` appends a managed block to `~/.zshrc` or `~/.bashrc` and infers the shell from `$SHELL`. When you omit the alias, it prompts interactively and defaults to `gw` if you just hit Enter. Passing a name explicitly still works for scripting. `--shell-integration-alias` still applies to `--print-shell-integration` when you want to generate a different helper script without installing it.
 
 The helper:
 

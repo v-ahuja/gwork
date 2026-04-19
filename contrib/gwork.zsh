@@ -1,4 +1,4 @@
-gwork() {
+gw() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     command gwork --help
     return $?
@@ -22,6 +22,7 @@ _gw_complete() {
     local -a flags=(
       '--print-shell-integration:print shell helper script'
       '--install-shell-integration:append shell integration to your shell rc file'
+      '--shell-integration-alias:override shell helper name for printed integration'
       '-new:open worktree in a new iTerm2 tab/window/split pane'
       '-b:create new branch and worktree'
       '-base:update base branch before creating a new branch'
@@ -52,6 +53,7 @@ _gw_complete() {
   _describe 'branch' branches
 }
 
+compdef _gw_complete gw
 compdef _gw_complete gwork
 compdef _gw_complete git-gwork
 _git_gwork() { _gw_complete "$@"; }

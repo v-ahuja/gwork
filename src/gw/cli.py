@@ -7,6 +7,7 @@ import enum
 import fnmatch
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -64,14 +65,17 @@ end tell
 """,
 }
 
-ZSH_INTEGRATION = """gwork() {
+DEFAULT_SHELL_ALIAS = "gw"
+SHELL_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+ZSH_INTEGRATION_TEMPLATE = """__ALIAS__() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gwork --help
+    command __COMMAND_NAME__ --help
     return $?
   fi
 
   local path rc
-  path="$(command gwork "$@")"
+  path="$(command __COMMAND_NAME__ "$@")"
   rc=$?
 
   if (( rc != 0 )); then
@@ -88,6 +92,7 @@ _gw_complete() {
     local -a flags=(
       '--print-shell-integration:print shell helper script'
       '--install-shell-integration:append shell integration to your shell rc file'
+      '--shell-integration-alias:override shell helper name for printed integration'
       '-new:open worktree in a new iTerm2 tab/window/split pane'
       '-b:create new branch and worktree'
       '-base:update base branch before creating a new branch'
@@ -118,19 +123,18 @@ _gw_complete() {
   _describe 'branch' branches
 }
 
-compdef _gw_complete gwork
-compdef _gw_complete git-gwork
+__ZSH_COMPLETION_DEFS__
 _git_gwork() { _gw_complete "$@"; }
 """
 
-BASH_INTEGRATION = """gwork() {
+BASH_INTEGRATION_TEMPLATE = """__ALIAS__() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gwork --help
+    command __COMMAND_NAME__ --help
     return $?
   fi
 
   local path rc
-  path="$(command gwork "$@")"
+  path="$(command __COMMAND_NAME__ "$@")"
   rc=$?
 
   if [[ $rc -ne 0 ]]; then
@@ -147,7 +151,7 @@ _gw_complete() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration -new -b -base -d -D" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration --shell-integration-alias -new -b -base -d -D" -- "$cur") )
     return
   fi
 
@@ -157,8 +161,7 @@ _gw_complete() {
   COMPREPLY=( $(compgen -W "co ${local_branches} ${remote_branches}" -- "$cur") )
 }
 
-complete -F _gw_complete gwork
-complete -F _gw_complete git-gwork
+__BASH_COMPLETION_DEFS__
 """
 
 SHELL_RC_FILES = {
@@ -174,8 +177,27 @@ def err(message: str) -> None:
     print(message, file=sys.stderr)
 
 
-def integration_script_for(shell: str) -> str:
-    return ZSH_INTEGRATION if shell == "zsh" else BASH_INTEGRATION
+def integration_script_for(shell: str, command_name: str, alias: str) -> str:
+    targets = [alias]
+    if command_name not in targets:
+        targets.append(command_name)
+
+    if shell == "zsh":
+        completion_defs = "\n".join(f"compdef _gw_complete {target}" for target in targets)
+        completion_defs += "\ncompdef _gw_complete git-gwork"
+        return (
+            ZSH_INTEGRATION_TEMPLATE.replace("__ALIAS__", alias)
+            .replace("__COMMAND_NAME__", command_name)
+            .replace("__ZSH_COMPLETION_DEFS__", completion_defs)
+        )
+
+    completion_defs = "\n".join(f"complete -F _gw_complete {target}" for target in targets)
+    completion_defs += "\ncomplete -F _gw_complete git-gwork"
+    return (
+        BASH_INTEGRATION_TEMPLATE.replace("__ALIAS__", alias)
+        .replace("__COMMAND_NAME__", command_name)
+        .replace("__BASH_COMPLETION_DEFS__", completion_defs)
+    )
 
 
 def git(*args: str, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -475,8 +497,9 @@ Notes:
   resolved worktree after switching to a worktree or creating a new one.
 
 Shell integration:
-  gwork --install-shell-integration [zsh|bash]
+  gwork --install-shell-integration gw
   gwork --print-shell-integration [zsh|bash]
+  gwork --print-shell-integration zsh --shell-integration-alias gw
 """,
     )
     parser.add_argument(
@@ -489,9 +512,18 @@ Shell integration:
     parser.add_argument(
         "--install-shell-integration",
         nargs="?",
-        const="auto",
-        metavar="SHELL",
-        help="append shell integration to ~/.zshrc or ~/.bashrc, inferring the shell when omitted",
+        const="prompt",
+        metavar="NAME",
+        help=(
+            "append shell integration to your shell rc file; when NAME is omitted, "
+            f"prompt interactively and default to {DEFAULT_SHELL_ALIAS}"
+        ),
+    )
+    parser.add_argument(
+        "--shell-integration-alias",
+        default=DEFAULT_SHELL_ALIAS,
+        metavar="NAME",
+        help=f"shell function name to install/print for integration helpers (default: {DEFAULT_SHELL_ALIAS})",
     )
     parser.add_argument(
         "-new",
@@ -545,13 +577,27 @@ def resolve_integration_shell(value: str) -> str:
     raise GwError("gwork: could not infer shell from $SHELL (specify 'zsh' or 'bash')")
 
 
-def install_shell_integration(shell: str) -> None:
+def resolve_integration_alias(value: str) -> str:
+    if SHELL_FUNCTION_NAME_RE.match(value):
+        return value
+    raise GwError(
+        f"gwork: unsupported shell integration alias '{value}' "
+        "(expected a shell function name like 'gw' or 'gwork')"
+    )
+
+
+def prompt_for_integration_alias() -> str:
+    response = input(f"gwork shell integration alias [{DEFAULT_SHELL_ALIAS}]: ").strip()
+    return response or DEFAULT_SHELL_ALIAS
+
+
+def install_shell_integration(shell: str, command_name: str, alias: str) -> None:
     rc_path = Path.home() / SHELL_RC_FILES[shell]
     block = "\n".join(
         [
             INSTALL_MARKER_START,
             "# Managed by gwork.",
-            integration_script_for(shell).rstrip(),
+            integration_script_for(shell, command_name, alias).rstrip(),
             INSTALL_MARKER_END,
             "",
         ]
@@ -593,13 +639,18 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
 
     try:
         if args.print_shell_integration:
+            integration_alias = resolve_integration_alias(args.shell_integration_alias)
             shell = resolve_integration_shell(args.print_shell_integration)
-            print(integration_script_for(shell), end="")
+            print(integration_script_for(shell, program, integration_alias), end="")
             return 0
 
         if args.install_shell_integration:
-            shell = resolve_integration_shell(args.install_shell_integration)
-            install_shell_integration(shell)
+            integration_alias_value = args.install_shell_integration
+            if integration_alias_value == "prompt":
+                integration_alias_value = prompt_for_integration_alias()
+            integration_alias = resolve_integration_alias(integration_alias_value)
+            shell = resolve_integration_shell("auto")
+            install_shell_integration(shell, program, integration_alias)
             return 0
 
         if not any((args.create, args.delete, args.force_delete, args.ref)):
