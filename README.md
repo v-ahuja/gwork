@@ -71,7 +71,7 @@ git gwork feature/foo
 
 Successful checkout and branch-creation commands print the absolute worktree path to stdout. That makes the plain CLI useful in scripts and also lets the shell helper `cd` automatically.
 
-### Shell integration
+### Shell integration (Highly recommended)
 
 The CLI itself cannot change your current shell directory. If you want `gwork` to drop you directly into the returned worktree, source the generated helper:
 
