@@ -9,6 +9,8 @@
 
 The core CLI works anywhere Git and Python 3.10+ work. The `-new` flag is an optional macOS-only convenience for opening the target worktree in iTerm2.
 
+Also check out https://worktrunk.dev/, for more / slightly different worktree management workflows.
+
 ## Install
 
 ### PyPI
@@ -104,11 +106,23 @@ The repository also includes checked-in copies under `contrib/` for users who pr
 
 `-new {tab,window,split-h,split-v}` opens the target worktree in iTerm2 via `osascript`. This mode is only supported on macOS, requires `osascript` on `PATH`, and requires iTerm2 to be running.
 
-## Manual includes
+## Worktree config and setup
 
-If the repository root contains `.gw/includes/manual_includes`, `gwork` copies the `.gw/` directory and any files matching those patterns into newly created worktrees. This is useful for local ignored files such as `.env`, `*.local`, or `config/.env.*`.
+The `.gw` folder contains the local repo config for `gwork`. Global/User level settings support will come shortly. The `.gw` folder is always copied when a new worktree is created.
+
+The `.gw/includes/manual_worktree` file lets you copy more things when a new worktree is created. It
+
+Currently, there's just one supported config - `manual_includes`. The `manual_includes` file is useful for automatically. This is useful for local ignored files such as `.env`, `*.local`, or `config/.env.*`.
 
 Patterns use shell-style globs. Git-ignored directories are pruned while scanning so large ignored trees like `node_modules/` are skipped.
+
+E.g file
+
+```zsh
+# .gw/includes/manual_worktree
+.env
+.credentials
+```
 
 ## Development
 
