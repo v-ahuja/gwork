@@ -9,16 +9,36 @@
 
 The core CLI works anywhere Git and Python 3.10+ work. The `-new` flag is an optional macOS-only convenience for opening the target worktree in iTerm2.
 
+New to worktrees? See [docs/worktrees.md](docs/worktrees.md) for a plain-English explanation and the full case for why gwork exists.
+
 Also check out https://worktrunk.dev/, for more / slightly different worktree management workflows.
+
+## Why gwork
+
+Git worktrees let each branch live in its own folder so you can work on multiple branches simultaneously — no stashing, no context switching. This is especially powerful with coding agents, where you can run several agents on separate features or fixes at the same time, each in its own isolated environment.
+
+The raw Git commands add up fast. Without gwork, creating a new worktree means running `git worktree add`, manually `cd`-ing to the path, and copying over any local config files by hand. Switching to an existing one means running `git worktree list` to find the path, then `cd`-ing there yourself.
+
+With gwork:
+
+```bash
+gw feature/auth          # jump to (or create) a worktree for this branch
+gw -b feature/new-thing  # new branch in its own worktree
+gw -d feature/old-thing  # delete worktree and branch together
+```
+
+One command handles the path, the `git worktree` plumbing, and copies files like `.env` automatically. With shell integration, it also `cd`s you straight into the result.
+
+→ Full breakdown with side-by-side comparisons: [docs/worktrees.md](docs/worktrees.md)
 
 ## Install
 
 ### From GitHub
 
 ```bash
-pipx install git+https://github.com/v-ahuja/gw.git
-uv tool install git+https://github.com/v-ahuja/gw.git
-uvx --from git+https://github.com/v-ahuja/gw.git gwork --help
+pipx install git+https://github.com/v-ahuja/gwork.git
+uv tool install git+https://github.com/v-ahuja/gwork.git
+uvx --from git+https://github.com/v-ahuja/gwork.git gwork --help
 ```
 
 Highly recommended next step after `uv tool install`:
@@ -27,7 +47,7 @@ Highly recommended next step after `uv tool install`:
 gwork --install-shell-integration
 ```
 
-That installs the `gw` shell helper so `gw <branch>` can switch worktrees and immediately `cd` into the result. Without shell integration, `gwork` still works, but it only prints the resolved path.
+That installs the `gwork` shell helper so `gwork <branch>` can switch worktrees and immediately `cd` into the result. Without shell integration, `gwork` still works, but it only prints the resolved path.
 
 ## Required setup
 
