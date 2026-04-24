@@ -4,16 +4,16 @@ gw() {
     return $?
   fi
 
-  local path rc
-  path="$(command gwork "$@")"
+  local worktree_path rc
+  worktree_path="$(command gwork "$@")"
   rc=$?
 
   if (( rc != 0 )); then
     return "$rc"
   fi
 
-  if [[ -n "$path" && -d "$path" ]]; then
-    cd "$path" || return 1
+  if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
+    cd "$worktree_path" || return 1
   fi
 }
 

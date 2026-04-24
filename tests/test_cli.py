@@ -162,8 +162,21 @@ class GwCliTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0)
             self.assertIn("gw() {", result.stdout)
+            self.assertIn("local worktree_path rc", result.stdout)
+            self.assertNotIn("local path rc", result.stdout)
             self.assertIn("compdef _gw_complete gwork", result.stdout)
             self.assertIn("compdef _gw_complete gw", result.stdout)
+            self.assertEqual(result.stderr, "")
+
+    def test_print_shell_integration_uses_worktree_path_in_bash(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "bash"], tmp_path)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("gw() {", result.stdout)
+            self.assertIn("local worktree_path rc", result.stdout)
+            self.assertNotIn("local path rc", result.stdout)
+            self.assertIn("complete -F _gw_complete gwork", result.stdout)
             self.assertEqual(result.stderr, "")
 
     def test_help_mentions_shell_integration_install_and_print(self) -> None:
@@ -233,6 +246,8 @@ class GwCliTests(unittest.TestCase):
             self.assertIn("installed shell integration", result.stderr)
             self.assertIn("# >>> gwork shell integration >>>", content)
             self.assertIn("gw() {", content)
+            self.assertIn("local worktree_path rc", content)
+            self.assertNotIn("local path rc", content)
             self.assertIn("command gwork", content)
             self.assertTrue(content.startswith("export BASE_WORKTREE"))
 

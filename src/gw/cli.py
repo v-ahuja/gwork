@@ -74,16 +74,16 @@ ZSH_INTEGRATION_TEMPLATE = """__ALIAS__() {
     return $?
   fi
 
-  local path rc
-  path="$(command __COMMAND_NAME__ "$@")"
+  local worktree_path rc
+  worktree_path="$(command __COMMAND_NAME__ "$@")"
   rc=$?
 
   if (( rc != 0 )); then
     return "$rc"
   fi
 
-  if [[ -n "$path" && -d "$path" ]]; then
-    cd "$path" || return 1
+  if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
+    cd "$worktree_path" || return 1
   fi
 }
 
@@ -133,16 +133,16 @@ BASH_INTEGRATION_TEMPLATE = """__ALIAS__() {
     return $?
   fi
 
-  local path rc
-  path="$(command __COMMAND_NAME__ "$@")"
+  local worktree_path rc
+  worktree_path="$(command __COMMAND_NAME__ "$@")"
   rc=$?
 
   if [[ $rc -ne 0 ]]; then
     return "$rc"
   fi
 
-  if [[ -n "$path" && -d "$path" ]]; then
-    cd "$path" || return 1
+  if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
+    cd "$worktree_path" || return 1
   fi
 }
 
