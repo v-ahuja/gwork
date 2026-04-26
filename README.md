@@ -33,6 +33,16 @@ One command handles the path, the `git worktree` plumbing, and copies files like
 
 ## Install
 
+### From PyPI
+
+```bash
+pipx install gwork
+uv tool install gwork
+uvx gwork --help
+```
+
+`pip install gwork` also works, but `pipx` or `uv tool install` keeps CLI tools isolated from project environments.
+
 ### From GitHub
 
 ```bash

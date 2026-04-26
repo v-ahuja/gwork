@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gwork"
-version = "0.1.0"
+version = "0.1.2"
 description = "Git worktree helper with optional shell integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,9 +30,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/v-ahuja/gw"
-Repository = "https://github.com/v-ahuja/gw"
-Issues = "https://github.com/v-ahuja/gw/issues"
+Homepage = "https://github.com/v-ahuja/gwork"
+Repository = "https://github.com/v-ahuja/gwork"
+Issues = "https://github.com/v-ahuja/gwork/issues"
 
 [project.scripts]
 gwork = "gw.cli:main"
