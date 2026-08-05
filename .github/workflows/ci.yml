@@ -26,9 +26,22 @@ jobs:
         run: python -m unittest discover -s tests
       - name: Smoke check entry points
         run: |
-          gw --help
-          git-gw --help
+          gwork --help
+          git-gwork --help
+      - name: Install fish
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y fish
+          else
+            brew install fish
+          fi
       - name: Shell helper syntax
         run: |
-          bash -n contrib/gw.bash
-          zsh -n contrib/gw.zsh
+          bash -n contrib/gwork.bash
+          zsh -n contrib/gwork.zsh
+          fish -n contrib/gwork.fish
+      - name: Checked-in contrib helpers match generated output
+        run: |
+          gwork --print-shell-integration bash | diff -u contrib/gwork.bash -
+          gwork --print-shell-integration zsh | diff -u contrib/gwork.zsh -
+          gwork --print-shell-integration fish | diff -u contrib/gwork.fish -

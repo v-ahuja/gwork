@@ -164,10 +164,60 @@ _gw_complete() {
 __BASH_COMPLETION_DEFS__
 """
 
+FISH_INTEGRATION_TEMPLATE = """function __ALIAS__
+  # `contains` avoids `test`, which would parse a leading flag such as -b or -d
+  # in $argv[1] as one of its own operators.
+  if contains -- "$argv[1]" --help -h
+    command __COMMAND_NAME__ --help
+    return $status
+  end
+
+  set -l worktree_path (command __COMMAND_NAME__ $argv)
+  set -l rc $status
+
+  if test $rc -ne 0
+    return $rc
+  end
+
+  if test -z "$worktree_path"
+    return 0
+  end
+
+  if test -d "$worktree_path"
+    cd "$worktree_path"; or return 1
+  end
+end
+
+function _gw_complete
+  git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null
+  git for-each-ref --format='%(refname:lstrip=3)' refs/remotes/ 2>/dev/null \\
+    | grep -v '^HEAD$' | sort -u
+end
+
+__FISH_COMPLETION_DEFS__
+"""
+
+FISH_COMPLETION_FLAGS = [
+    ("print-shell-integration", "print shell helper script"),
+    ("install-shell-integration", "append shell integration to your shell rc file"),
+    ("shell-integration-alias", "override shell helper name for printed integration"),
+]
+
+FISH_SHORT_FLAGS = [
+    ("new", "open worktree in a new iTerm2 tab/window/split pane"),
+    ("b", "create new branch and worktree"),
+    ("base", "update base branch before creating a new branch"),
+    ("d", "remove worktree and delete branch"),
+    ("D", "force-remove worktree and delete branch"),
+]
+
 SHELL_RC_FILES = {
     "zsh": ".zshrc",
     "bash": ".bashrc",
+    "fish": ".config/fish/config.fish",
 }
+
+SUPPORTED_INTEGRATION_SHELLS = ("zsh", "bash", "fish")
 
 INSTALL_MARKER_START = "# >>> gwork shell integration >>>"
 INSTALL_MARKER_END = "# <<< gwork shell integration <<<"
@@ -177,10 +227,39 @@ def err(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def fish_completion_defs(targets: list[str]) -> str:
+    """Build `complete -c` lines for each fish completion target.
+
+    Args:
+        targets: Command names to register completions for.
+
+    Returns:
+        Newline-joined fish `complete` statements.
+    """
+    lines: list[str] = []
+    for target in targets:
+        for flag, description in FISH_COMPLETION_FLAGS:
+            lines.append(f"complete -c {target} -l {flag} -d '{description}'")
+        for flag, description in FISH_SHORT_FLAGS:
+            # gwork uses single-dash multi-character flags, which fish models
+            # as "old style" options via -o.
+            lines.append(f"complete -c {target} -o {flag} -d '{description}'")
+        lines.append(f"complete -c {target} -f -a '(_gw_complete)' -d 'branch'")
+    return "\n".join(lines)
+
+
 def integration_script_for(shell: str, command_name: str, alias: str) -> str:
     targets = [alias]
     if command_name not in targets:
         targets.append(command_name)
+
+    if shell == "fish":
+        completion_defs = fish_completion_defs([*targets, "git-gwork"])
+        return (
+            FISH_INTEGRATION_TEMPLATE.replace("__ALIAS__", alias)
+            .replace("__COMMAND_NAME__", command_name)
+            .replace("__FISH_COMPLETION_DEFS__", completion_defs)
+        )
 
     if shell == "zsh":
         completion_defs = "\n".join(f"compdef _gw_complete {target}" for target in targets)
@@ -498,7 +577,7 @@ Notes:
 
 Shell integration:
   gwork --install-shell-integration gw
-  gwork --print-shell-integration [zsh|bash]
+  gwork --print-shell-integration [zsh|bash|fish]
   gwork --print-shell-integration zsh --shell-integration-alias gw
 """,
     )
@@ -507,7 +586,7 @@ Shell integration:
         nargs="?",
         const="auto",
         metavar="SHELL",
-        help="print the shell helper for zsh/bash, or infer it from $SHELL when omitted",
+        help="print the shell helper for zsh/bash/fish, or infer it from $SHELL when omitted",
     )
     parser.add_argument(
         "--install-shell-integration",
@@ -565,16 +644,19 @@ def validate_new_mode(new_mode: NewMode | None) -> None:
 
 
 def resolve_integration_shell(value: str) -> str:
-    if value in {"zsh", "bash"}:
+    expected = ", ".join(SUPPORTED_INTEGRATION_SHELLS)
+    if value in SUPPORTED_INTEGRATION_SHELLS:
         return value
     if value != "auto":
-        raise GwError(f"gwork: unsupported shell integration target '{value}' (expected zsh or bash)")
+        raise GwError(
+            f"gwork: unsupported shell integration target '{value}' (expected {expected})"
+        )
 
     shell = Path(os.environ.get("SHELL", "")).name
-    if shell in {"zsh", "bash"}:
+    if shell in SUPPORTED_INTEGRATION_SHELLS:
         return shell
 
-    raise GwError("gwork: could not infer shell from $SHELL (specify 'zsh' or 'bash')")
+    raise GwError(f"gwork: could not infer shell from $SHELL (specify one of {expected})")
 
 
 def resolve_integration_alias(value: str) -> str:
@@ -593,6 +675,7 @@ def prompt_for_integration_alias() -> str:
 
 def install_shell_integration(shell: str, command_name: str, alias: str) -> None:
     rc_path = Path.home() / SHELL_RC_FILES[shell]
+    rc_path.parent.mkdir(parents=True, exist_ok=True)
     block = "\n".join(
         [
             INSTALL_MARKER_START,
