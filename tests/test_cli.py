@@ -157,6 +157,45 @@ class GwCliTests(unittest.TestCase):
                 0,
             )
 
+    def test_create_branch_carries_over_staged_unstaged_and_untracked_changes(self) -> None:
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            base = tmp_path / "worktrees"
+            base.mkdir()
+            init_repo(repo)
+
+            (repo / "README.md").write_text("carried unstaged\n", encoding="utf-8")
+            (repo / "staged.txt").write_text("carried staged\n", encoding="utf-8")
+            git(repo, "add", "staged.txt")
+            (repo / "untracked.txt").write_text("carried untracked\n", encoding="utf-8")
+
+            result = run_gw(["-b", "feature/carryover"], repo, env={"BASE_WORKTREE": str(base)})
+            target = Path(result.stdout.strip())
+
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), "carried unstaged\n")
+            self.assertEqual((target / "staged.txt").read_text(encoding="utf-8"), "carried staged\n")
+            self.assertEqual((target / "untracked.txt").read_text(encoding="utf-8"), "carried untracked\n")
+            self.assertIn("staged.txt", git(target, "diff", "--cached", "--name-only").stdout.splitlines())
+            self.assertEqual(git(repo, "status", "--porcelain").stdout, "")
+            self.assertEqual(git(repo, "stash", "list").stdout, "")
+
+    def test_create_branch_carries_over_only_untracked_changes(self) -> None:
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            base = tmp_path / "worktrees"
+            base.mkdir()
+            init_repo(repo)
+
+            (repo / "untracked.txt").write_text("carried untracked\n", encoding="utf-8")
+
+            result = run_gw(["-b", "feature/untracked"], repo, env={"BASE_WORKTREE": str(base)})
+            target = Path(result.stdout.strip())
+
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((target / "untracked.txt").read_text(encoding="utf-8"), "carried untracked\n")
+            self.assertEqual(git(repo, "status", "--porcelain").stdout, "")
+
     def test_print_shell_integration_does_not_require_repo(self) -> None:
         with tempfile_dir() as tmp_path:
             result = run_gw(["--print-shell-integration", "zsh"], tmp_path)
@@ -654,6 +693,33 @@ class GwCliTests(unittest.TestCase):
             self.assertEqual((target / ".env").read_text(encoding="utf-8"), "SECRET=1\n")
             self.assertEqual((target / ".gw" / "config").read_text(encoding="utf-8"), "data\n")
             self.assertFalse((target / "node_modules" / "ignored.txt").exists())
+
+    def test_untracked_manual_includes_are_copied_with_carryover_changes(self) -> None:
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            base = tmp_path / "worktrees"
+            base.mkdir()
+            init_repo(repo)
+
+            (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore local environment")
+            (repo / ".env").write_text("SECRET=1\n", encoding="utf-8")
+            (repo / ".gw" / "includes").mkdir(parents=True)
+            (repo / ".gw" / "includes" / "manual_includes").write_text(".env\n", encoding="utf-8")
+            (repo / ".gw" / "config").write_text("local data\n", encoding="utf-8")
+            (repo / "README.md").write_text("carried unstaged\n", encoding="utf-8")
+            (repo / "untracked.txt").write_text("carried untracked\n", encoding="utf-8")
+
+            result = run_gw(["-b", "feature/includes-carryover"], repo, env={"BASE_WORKTREE": str(base)})
+            target = Path(result.stdout.strip())
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((target / ".env").read_text(encoding="utf-8"), "SECRET=1\n")
+            self.assertEqual((target / ".gw" / "config").read_text(encoding="utf-8"), "local data\n")
+            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), "carried unstaged\n")
+            self.assertEqual((target / "untracked.txt").read_text(encoding="utf-8"), "carried untracked\n")
+            self.assertEqual(git(repo, "status", "--porcelain").stdout, "")
 
     @unittest.skipIf(sys.platform == "darwin", "non-macOS rejection only applies off macOS")
     def test_new_mode_is_rejected_off_macos(self) -> None:
