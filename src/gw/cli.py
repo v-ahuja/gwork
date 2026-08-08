@@ -11,6 +11,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import uuid
 
 
 class NewMode(enum.Enum):
@@ -279,18 +281,44 @@ def integration_script_for(shell: str, command_name: str, alias: str) -> str:
     )
 
 
-def git(*args: str, capture: bool = False, check: bool = True) -> subprocess.CompletedProcess[str]:
+def git(
+    *args: str,
+    capture: bool = False,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    process_env = None
+    if env is not None:
+        process_env = {**os.environ, **env}
     return subprocess.run(
         ["git", *args],
         capture_output=capture,
         text=True,
         check=check,
+        env=process_env,
     )
 
 
 def git_output(*args: str) -> str:
     result = git(*args, capture=True, check=True)
     return result.stdout.strip()
+
+
+def commit_tree(tree: str, message: str, parents: list[str] | None = None) -> str:
+    args = ["commit-tree", tree, "-m", message]
+    for parent in parents or []:
+        args.extend(["-p", parent])
+    return git(
+        *args,
+        capture=True,
+        check=True,
+        env={
+            "GIT_AUTHOR_NAME": "gwork",
+            "GIT_AUTHOR_EMAIL": "gwork@localhost",
+            "GIT_COMMITTER_NAME": "gwork",
+            "GIT_COMMITTER_EMAIL": "gwork@localhost",
+        },
+    ).stdout.strip()
 
 
 def git_check(*args: str) -> bool:
@@ -399,9 +427,112 @@ def emit_path(path: str, new_mode: NewMode | None) -> str:
     return canonical_path
 
 
-def finish_new_worktree(target_path: str, main_worktree_root: str | None, new_mode: NewMode | None) -> str:
+def stash_worktree_changes() -> str | None:
+    status = git(
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        capture=True,
+        check=True,
+    )
+    if not status.stdout:
+        return None
+
+    token = f"gwork-carryover-{uuid.uuid4().hex}"
+    head = git_output("rev-parse", "HEAD")
+    tracked_stash = git("stash", "create", token, capture=True, check=True).stdout.strip()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        if not tracked_stash:
+            index_tree = git_output("write-tree")
+            index_commit = commit_tree(index_tree, token)
+            worktree_tree = git_output("rev-parse", "HEAD^{tree}")
+            tracked_stash = commit_tree(worktree_tree, token, [head, index_commit])
+
+        untracked = git(
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            capture=True,
+            check=True,
+        ).stdout
+        stash_id = tracked_stash
+        if untracked:
+            temp_index = str(Path(temp_dir, "index"))
+            temp_pathspec = Path(temp_dir, "untracked-paths")
+            temp_pathspec.write_bytes(untracked.encode())
+            index_env = {"GIT_INDEX_FILE": temp_index}
+            git("read-tree", "--empty", capture=True, check=True, env=index_env)
+            git(
+                "add",
+                f"--pathspec-from-file={temp_pathspec}",
+                "--pathspec-file-nul",
+                capture=True,
+                check=True,
+                env=index_env,
+            )
+            untracked_tree = git("write-tree", capture=True, check=True, env=index_env).stdout.strip()
+            untracked_commit = commit_tree(untracked_tree, token)
+
+            parents = git("rev-list", "--parents", "-n1", tracked_stash, capture=True, check=True).stdout.split()
+            worktree_tree = git_output("rev-parse", f"{tracked_stash}^{{tree}}")
+            stash_id = commit_tree(worktree_tree, token, [parents[1], parents[2], untracked_commit])
+
+    stash_ref = f"refs/gwork/carryover/{token.removeprefix('gwork-carryover-')}"
+    git("update-ref", stash_ref, stash_id, capture=True, check=True)
+    git("reset", "--hard", "HEAD", capture=True, check=True)
+    git("clean", "-fd", capture=True, check=True)
+    return stash_ref
+
+
+def apply_carryover_stash(target_path: str, stash_ref: str) -> None:
+    stash_id = git(
+        "-C",
+        target_path,
+        "rev-parse",
+        stash_ref,
+        capture=True,
+        check=True,
+    ).stdout.strip()
+    try:
+        git(
+            "-C",
+            target_path,
+            "stash",
+            "apply",
+            "--index",
+            stash_ref,
+            capture=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or "").strip()
+        detail = f": {message}" if message else ""
+        raise GwError(
+            f"gwork: could not carry over changes; stash {stash_ref} was kept{detail}"
+        ) from exc
+
+    try:
+        git("update-ref", "-d", stash_ref, stash_id, capture=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or "").strip()
+        detail = f": {message}" if message else ""
+        raise GwError(
+            f"gwork: changes were carried over, but stash {stash_ref} was kept{detail}"
+        ) from exc
+
+
+def finish_new_worktree(
+    target_path: str,
+    main_worktree_root: str | None,
+    new_mode: NewMode | None,
+    carryover_stash: str | None = None,
+) -> str:
     if main_worktree_root:
         copy_manual_includes(main_worktree_root, target_path)
+    if carryover_stash:
+        apply_carryover_stash(target_path, carryover_stash)
     return emit_path(target_path, new_mode)
 
 
@@ -506,6 +637,7 @@ def do_create_branch(
     repo_base: str,
     main_worktree_root: str | None,
     new_mode: NewMode | None,
+    carryover_stash: str | None = None,
 ) -> str:
     existing = find_worktree_for_local_branch(new_branch)
     if existing:
@@ -520,7 +652,7 @@ def do_create_branch(
     else:
         git("worktree", "add", "-b", new_branch, target_path, capture=True)
 
-    return finish_new_worktree(target_path, main_worktree_root, new_mode)
+    return finish_new_worktree(target_path, main_worktree_root, new_mode, carryover_stash)
 
 
 def do_checkout_ref(
@@ -753,9 +885,26 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
         elif args.force_delete:
             do_delete(args.force_delete, force=True)
         elif args.create:
-            if args.base:
-                update_base_branch(args.base, main_worktree_root)
-            output = do_create_branch(args.create, args.base, repo_base, main_worktree_root, new_mode)
+            existing = find_worktree_for_local_branch(args.create)
+            if existing:
+                output = do_create_branch(args.create, args.base, repo_base, main_worktree_root, new_mode)
+            else:
+                if git_check("show-ref", "--verify", "--quiet", f"refs/heads/{args.create}"):
+                    raise GwError(
+                        f"gwork: branch '{args.create}' already exists (use gwork '{args.create}')"
+                    )
+
+                carryover_stash = stash_worktree_changes()
+                if args.base:
+                    update_base_branch(args.base, main_worktree_root)
+                output = do_create_branch(
+                    args.create,
+                    args.base,
+                    repo_base,
+                    main_worktree_root,
+                    new_mode,
+                    carryover_stash,
+                )
         else:
             output = do_checkout_ref(args.ref, repo_base, main_worktree_root, default_branch, new_mode)
     except GwError as exc:

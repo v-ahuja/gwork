@@ -157,6 +157,45 @@ class GwCliTests(unittest.TestCase):
                 0,
             )
 
+    def test_create_branch_carries_over_staged_unstaged_and_untracked_changes(self) -> None:
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            base = tmp_path / "worktrees"
+            base.mkdir()
+            init_repo(repo)
+
+            (repo / "README.md").write_text("carried unstaged\n", encoding="utf-8")
+            (repo / "staged.txt").write_text("carried staged\n", encoding="utf-8")
+            git(repo, "add", "staged.txt")
+            (repo / "untracked.txt").write_text("carried untracked\n", encoding="utf-8")
+
+            result = run_gw(["-b", "feature/carryover"], repo, env={"BASE_WORKTREE": str(base)})
+            target = Path(result.stdout.strip())
+
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), "carried unstaged\n")
+            self.assertEqual((target / "staged.txt").read_text(encoding="utf-8"), "carried staged\n")
+            self.assertEqual((target / "untracked.txt").read_text(encoding="utf-8"), "carried untracked\n")
+            self.assertIn("staged.txt", git(target, "diff", "--cached", "--name-only").stdout.splitlines())
+            self.assertEqual(git(repo, "status", "--porcelain").stdout, "")
+            self.assertEqual(git(repo, "stash", "list").stdout, "")
+
+    def test_create_branch_carries_over_only_untracked_changes(self) -> None:
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            base = tmp_path / "worktrees"
+            base.mkdir()
+            init_repo(repo)
+
+            (repo / "untracked.txt").write_text("carried untracked\n", encoding="utf-8")
+
+            result = run_gw(["-b", "feature/untracked"], repo, env={"BASE_WORKTREE": str(base)})
+            target = Path(result.stdout.strip())
+
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((target / "untracked.txt").read_text(encoding="utf-8"), "carried untracked\n")
+            self.assertEqual(git(repo, "status", "--porcelain").stdout, "")
+
     def test_print_shell_integration_does_not_require_repo(self) -> None:
         with tempfile_dir() as tmp_path:
             result = run_gw(["--print-shell-integration", "zsh"], tmp_path)
