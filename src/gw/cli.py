@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import enum
 import fnmatch
 import os
@@ -24,6 +25,19 @@ class NewMode(enum.Enum):
 
 class GwError(RuntimeError):
     """Raised for user-facing gwork failures."""
+
+
+@dataclass
+class CarryoverState:
+    """Saved worktree changes and temporary local metadata."""
+
+    stash_ref: str
+    snapshot_root: str | None = None
+
+    def cleanup(self) -> None:
+        """Remove temporary snapshot data."""
+        if self.snapshot_root:
+            shutil.rmtree(self.snapshot_root, ignore_errors=True)
 
 
 ITERM_SCRIPTS: dict[NewMode, str] = {
@@ -226,6 +240,11 @@ INSTALL_MARKER_END = "# <<< gwork shell integration <<<"
 
 
 def err(message: str) -> None:
+    """Print a message to standard error.
+
+    Args:
+        message: Text to print.
+    """
     print(message, file=sys.stderr)
 
 
@@ -251,6 +270,13 @@ def fish_completion_defs(targets: list[str]) -> str:
 
 
 def integration_script_for(shell: str, command_name: str, alias: str) -> str:
+    """Build the helper script for a supported shell.
+
+    Args:
+        shell: Shell to build the script for.
+        command_name: Command the helper should run.
+        alias: Name of the shell helper.
+    """
     targets = [alias]
     if command_name not in targets:
         targets.append(command_name)
@@ -287,6 +313,14 @@ def git(
     check: bool = True,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    """Run a Git command and return its result.
+
+    Args:
+        *args: Arguments to pass to Git.
+        capture: Whether to collect command output.
+        check: Whether to raise an error when Git fails.
+        env: Extra environment values for the command.
+    """
     process_env = None
     if env is not None:
         process_env = {**os.environ, **env}
@@ -300,11 +334,23 @@ def git(
 
 
 def git_output(*args: str) -> str:
+    """Run a Git command and return its trimmed output.
+
+    Args:
+        *args: Arguments to pass to Git.
+    """
     result = git(*args, capture=True, check=True)
     return result.stdout.strip()
 
 
 def commit_tree(tree: str, message: str, parents: list[str] | None = None) -> str:
+    """Create a commit from a tree and return its ID.
+
+    Args:
+        tree: ID of the tree to commit.
+        message: Commit message.
+        parents: IDs of any parent commits.
+    """
     args = ["commit-tree", tree, "-m", message]
     for parent in parents or []:
         args.extend(["-p", parent])
@@ -322,15 +368,30 @@ def commit_tree(tree: str, message: str, parents: list[str] | None = None) -> st
 
 
 def git_check(*args: str) -> bool:
+    """Return whether a Git command succeeds.
+
+    Args:
+        *args: Arguments to pass to Git.
+    """
     result = git(*args, capture=True, check=False)
     return result.returncode == 0
 
 
 def sanitize(name: str) -> str:
+    """Convert a branch name into a directory name.
+
+    Args:
+        name: Branch name to convert.
+    """
     return name.replace("/", "__")
 
 
 def find_worktree_for_local_branch(branch: str) -> str | None:
+    """Find the worktree that uses a local branch.
+
+    Args:
+        branch: Local branch to find.
+    """
     target_ref = f"refs/heads/{branch}"
     result = git("worktree", "list", "--porcelain", capture=True, check=True)
     current_worktree = None
@@ -343,6 +404,7 @@ def find_worktree_for_local_branch(branch: str) -> str | None:
 
 
 def get_default_branch() -> str | None:
+    """Return the default branch reported by origin."""
     result = git("symbolic-ref", "refs/remotes/origin/HEAD", capture=True, check=False)
     if result.returncode == 0:
         return result.stdout.strip().removeprefix("refs/remotes/origin/")
@@ -350,11 +412,24 @@ def get_default_branch() -> str | None:
 
 
 def target_dir_for(name: str, repo_base: str) -> str:
+    """Return the full worktree path for a name.
+
+    Args:
+        name: Branch or reference name.
+        repo_base: Directory that holds the repository's worktrees.
+    """
     return str(Path(repo_base, sanitize(name)).resolve())
 
 
-def copy_manual_includes(main_root: str, target: str) -> None:
-    gw_src = os.path.join(main_root, ".gw")
+def copy_manual_includes(main_root: str, target: str, metadata_root: str | None = None) -> None:
+    """Copy configured local files into a new worktree.
+
+    Args:
+        main_root: Path to the main worktree.
+        target: Path to the new worktree.
+        metadata_root: Alternate root containing a preserved ``.gw`` directory.
+    """
+    gw_src = os.path.join(metadata_root or main_root, ".gw")
     if os.path.isdir(gw_src):
         gw_dst = os.path.join(target, ".gw")
         if os.path.exists(gw_dst):
@@ -362,7 +437,7 @@ def copy_manual_includes(main_root: str, target: str) -> None:
         shutil.copytree(gw_src, gw_dst)
         err("gwork: copied .gw/")
 
-    includes_file = os.path.join(main_root, ".gw", "includes", "manual_includes")
+    includes_file = os.path.join(gw_src, "includes", "manual_includes")
     if not os.path.isfile(includes_file):
         return
 
@@ -415,11 +490,23 @@ def copy_manual_includes(main_root: str, target: str) -> None:
 
 
 def open_iterm(path: str, mode: NewMode) -> None:
+    """Open a path in a new iTerm2 session.
+
+    Args:
+        path: Directory to open.
+        mode: Kind of iTerm2 session to create.
+    """
     script = ITERM_SCRIPTS[mode].format(path=path)
     subprocess.run(["osascript", "-e", script], check=True)
 
 
 def emit_path(path: str, new_mode: NewMode | None) -> str:
+    """Return a full path or open it in iTerm2.
+
+    Args:
+        path: Worktree path to handle.
+        new_mode: iTerm2 session type, if requested.
+    """
     canonical_path = str(Path(path).resolve())
     if new_mode:
         open_iterm(canonical_path, new_mode)
@@ -427,7 +514,8 @@ def emit_path(path: str, new_mode: NewMode | None) -> str:
     return canonical_path
 
 
-def stash_worktree_changes() -> str | None:
+def stash_worktree_changes() -> CarryoverState | None:
+    """Save current changes for transfer to a new worktree."""
     status = git(
         "status",
         "--porcelain",
@@ -479,14 +567,26 @@ def stash_worktree_changes() -> str | None:
             worktree_tree = git_output("rev-parse", f"{tracked_stash}^{{tree}}")
             stash_id = commit_tree(worktree_tree, token, [parents[1], parents[2], untracked_commit])
 
+    snapshot_root = None
+    gw_src = Path.cwd() / ".gw"
+    if gw_src.is_dir():
+        snapshot_root = tempfile.mkdtemp(prefix="gwork-carryover-")
+        shutil.copytree(gw_src, Path(snapshot_root, ".gw"))
+
     stash_ref = f"refs/gwork/carryover/{token.removeprefix('gwork-carryover-')}"
     git("update-ref", stash_ref, stash_id, capture=True, check=True)
     git("reset", "--hard", "HEAD", capture=True, check=True)
     git("clean", "-fd", capture=True, check=True)
-    return stash_ref
+    return CarryoverState(stash_ref, snapshot_root)
 
 
 def apply_carryover_stash(target_path: str, stash_ref: str) -> None:
+    """Restore saved changes in a new worktree.
+
+    Args:
+        target_path: Path to the new worktree.
+        stash_ref: Name of the saved changes.
+    """
     stash_id = git(
         "-C",
         target_path,
@@ -527,16 +627,29 @@ def finish_new_worktree(
     target_path: str,
     main_worktree_root: str | None,
     new_mode: NewMode | None,
-    carryover_stash: str | None = None,
+    carryover: CarryoverState | None = None,
 ) -> str:
+    """Set up a new worktree and return or open its path.
+
+    Args:
+        target_path: Path to the new worktree.
+        main_worktree_root: Path to the main worktree, if available.
+        new_mode: iTerm2 session type, if requested.
+        carryover: Saved changes and local metadata to restore, if any.
+    """
+    if carryover:
+        apply_carryover_stash(target_path, carryover.stash_ref)
     if main_worktree_root:
-        copy_manual_includes(main_worktree_root, target_path)
-    if carryover_stash:
-        apply_carryover_stash(target_path, carryover_stash)
+        copy_manual_includes(
+            main_worktree_root,
+            target_path,
+            carryover.snapshot_root if carryover else None,
+        )
     return emit_path(target_path, new_mode)
 
 
 def get_repo_info() -> tuple[str, str, str | None]:
+    """Return the repository name, worktree folder, and main path."""
     base_worktree = os.environ.get("BASE_WORKTREE", "")
     if not base_worktree:
         raise GwError(
@@ -572,6 +685,12 @@ def get_repo_info() -> tuple[str, str, str | None]:
 
 
 def update_base_branch(base: str, main_worktree_root: str | None) -> None:
+    """Update a base branch and remove branches gone from the remote.
+
+    Args:
+        base: Base branch to update.
+        main_worktree_root: Path to the main worktree, if available.
+    """
     worktree_path = find_worktree_for_local_branch(base)
     if not worktree_path:
         remote_check = git("branch", "-r", "--list", f"*/{base}", capture=True, check=True)
@@ -598,6 +717,12 @@ def update_base_branch(base: str, main_worktree_root: str | None) -> None:
 
 
 def do_delete(branch: str, force: bool) -> None:
+    """Remove a branch and its worktree when safe or forced.
+
+    Args:
+        branch: Branch to remove.
+        force: Whether to remove an unmerged branch.
+    """
     worktree_path = find_worktree_for_local_branch(branch)
     branch_exists = git_check("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
 
@@ -637,8 +762,18 @@ def do_create_branch(
     repo_base: str,
     main_worktree_root: str | None,
     new_mode: NewMode | None,
-    carryover_stash: str | None = None,
+    carryover: CarryoverState | None = None,
 ) -> str:
+    """Create a branch in a worktree and return or open its path.
+
+    Args:
+        new_branch: Name of the branch to create.
+        base: Branch or reference to start from, if provided.
+        repo_base: Directory that holds the repository's worktrees.
+        main_worktree_root: Path to the main worktree, if available.
+        new_mode: iTerm2 session type, if requested.
+        carryover: Saved changes and local metadata to restore, if any.
+    """
     existing = find_worktree_for_local_branch(new_branch)
     if existing:
         return emit_path(existing, new_mode)
@@ -652,7 +787,7 @@ def do_create_branch(
     else:
         git("worktree", "add", "-b", new_branch, target_path, capture=True)
 
-    return finish_new_worktree(target_path, main_worktree_root, new_mode, carryover_stash)
+    return finish_new_worktree(target_path, main_worktree_root, new_mode, carryover)
 
 
 def do_checkout_ref(
@@ -662,6 +797,15 @@ def do_checkout_ref(
     default_branch: str | None,
     new_mode: NewMode | None,
 ) -> str:
+    """Find or create a worktree for a branch or commit.
+
+    Args:
+        ref: Branch, remote branch, or commit to use.
+        repo_base: Directory that holds the repository's worktrees.
+        main_worktree_root: Path to the main worktree, if available.
+        default_branch: Name of the default branch, if known.
+        new_mode: iTerm2 session type, if requested.
+    """
     existing = find_worktree_for_local_branch(ref)
     if existing:
         return emit_path(existing, new_mode)
@@ -691,6 +835,11 @@ def do_checkout_ref(
 
 
 def build_parser(prog_name: str = "gwork") -> argparse.ArgumentParser:
+    """Build the command-line argument parser.
+
+    Args:
+        prog_name: Program name to show in help text.
+    """
     parser = argparse.ArgumentParser(
         prog=prog_name,
         description="Git worktree helper.",
@@ -759,6 +908,11 @@ Shell integration:
 
 
 def validate_new_mode(new_mode: NewMode | None) -> None:
+    """Check that the requested iTerm2 mode can run.
+
+    Args:
+        new_mode: iTerm2 session type, if requested.
+    """
     if not new_mode:
         return
     if sys.platform != "darwin":
@@ -776,6 +930,11 @@ def validate_new_mode(new_mode: NewMode | None) -> None:
 
 
 def resolve_integration_shell(value: str) -> str:
+    """Choose a supported shell for integration.
+
+    Args:
+        value: Shell name or ``auto`` to detect it.
+    """
     expected = ", ".join(SUPPORTED_INTEGRATION_SHELLS)
     if value in SUPPORTED_INTEGRATION_SHELLS:
         return value
@@ -792,6 +951,11 @@ def resolve_integration_shell(value: str) -> str:
 
 
 def resolve_integration_alias(value: str) -> str:
+    """Check and return a shell helper name.
+
+    Args:
+        value: Proposed shell helper name.
+    """
     if SHELL_FUNCTION_NAME_RE.match(value):
         return value
     raise GwError(
@@ -801,11 +965,19 @@ def resolve_integration_alias(value: str) -> str:
 
 
 def prompt_for_integration_alias() -> str:
+    """Ask for the shell helper name."""
     response = input(f"gwork shell integration alias [{DEFAULT_SHELL_ALIAS}]: ").strip()
     return response or DEFAULT_SHELL_ALIAS
 
 
 def install_shell_integration(shell: str, command_name: str, alias: str) -> None:
+    """Add the shell helper to the user's shell settings.
+
+    Args:
+        shell: Shell whose settings should be updated.
+        command_name: Command the helper should run.
+        alias: Name of the shell helper.
+    """
     rc_path = Path.home() / SHELL_RC_FILES[shell]
     rc_path.parent.mkdir(parents=True, exist_ok=True)
     block = "\n".join(
@@ -844,6 +1016,12 @@ def install_shell_integration(shell: str, command_name: str, alias: str) -> None
 
 
 def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
+    """Run the command and return its exit code.
+
+    Args:
+        argv: Command arguments, or the process arguments when omitted.
+        prog_name: Program name to show in help text.
+    """
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "co":
         argv.pop(0)
@@ -852,6 +1030,7 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
     parser = build_parser(program)
     args = parser.parse_args(argv)
 
+    carryover: CarryoverState | None = None
     try:
         if args.print_shell_integration:
             integration_alias = resolve_integration_alias(args.shell_integration_alias)
@@ -894,7 +1073,7 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
                         f"gwork: branch '{args.create}' already exists (use gwork '{args.create}')"
                     )
 
-                carryover_stash = stash_worktree_changes()
+                carryover = stash_worktree_changes()
                 if args.base:
                     update_base_branch(args.base, main_worktree_root)
                 output = do_create_branch(
@@ -903,7 +1082,7 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
                     repo_base,
                     main_worktree_root,
                     new_mode,
-                    carryover_stash,
+                    carryover,
                 )
         else:
             output = do_checkout_ref(args.ref, repo_base, main_worktree_root, default_branch, new_mode)
@@ -914,6 +1093,9 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
         message = (exc.stderr or exc.stdout or "").strip()
         err(message if message else f"gwork: git command failed: {' '.join(exc.cmd)}")
         return 1
+    finally:
+        if carryover:
+            carryover.cleanup()
 
     if output:
         print(output)
@@ -921,4 +1103,5 @@ def run(argv: list[str] | None = None, prog_name: str | None = None) -> int:
 
 
 def main() -> int:
+    """Start the command-line program."""
     return run()

@@ -685,6 +685,33 @@ class GwCliTests(unittest.TestCase):
             self.assertEqual((target / ".gw" / "config").read_text(encoding="utf-8"), "data\n")
             self.assertFalse((target / "node_modules" / "ignored.txt").exists())
 
+    def test_untracked_manual_includes_are_copied_with_carryover_changes(self) -> None:
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            base = tmp_path / "worktrees"
+            base.mkdir()
+            init_repo(repo)
+
+            (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+            git(repo, "add", ".gitignore")
+            git(repo, "commit", "-m", "ignore local environment")
+            (repo / ".env").write_text("SECRET=1\n", encoding="utf-8")
+            (repo / ".gw" / "includes").mkdir(parents=True)
+            (repo / ".gw" / "includes" / "manual_includes").write_text(".env\n", encoding="utf-8")
+            (repo / ".gw" / "config").write_text("local data\n", encoding="utf-8")
+            (repo / "README.md").write_text("carried unstaged\n", encoding="utf-8")
+            (repo / "untracked.txt").write_text("carried untracked\n", encoding="utf-8")
+
+            result = run_gw(["-b", "feature/includes-carryover"], repo, env={"BASE_WORKTREE": str(base)})
+            target = Path(result.stdout.strip())
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((target / ".env").read_text(encoding="utf-8"), "SECRET=1\n")
+            self.assertEqual((target / ".gw" / "config").read_text(encoding="utf-8"), "local data\n")
+            self.assertEqual((target / "README.md").read_text(encoding="utf-8"), "carried unstaged\n")
+            self.assertEqual((target / "untracked.txt").read_text(encoding="utf-8"), "carried untracked\n")
+            self.assertEqual(git(repo, "status", "--porcelain").stdout, "")
+
     @unittest.skipIf(sys.platform == "darwin", "non-macOS rejection only applies off macOS")
     def test_new_mode_is_rejected_off_macos(self) -> None:
         with tempfile_dir() as tmp_path:
