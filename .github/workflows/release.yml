@@ -1,0 +1,179 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - src/gw/__init__.py
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate version and build distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out the merged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade build packaging twine
+
+      - name: Verify the version bump
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import urllib.error
+          import urllib.request
+
+          from packaging.version import InvalidVersion, Version
+
+          def project_version(text, source):
+              match = re.search(r'(?m)^version = "([^"]+)"$', text)
+              if not match:
+                  raise SystemExit(f"Could not find version in {source}")
+              try:
+                  parsed = Version(match.group(1))
+              except InvalidVersion as error:
+                  raise SystemExit(f"Invalid version in {source}: {match.group(1)!r}") from error
+              if str(parsed) != match.group(1):
+                  raise SystemExit(f"Version in {source} is not canonical PEP 440: {match.group(1)!r}")
+              return parsed
+
+          pyproject = pathlib.Path("pyproject.toml").read_text()
+          package = pathlib.Path("src/gw/__init__.py").read_text()
+          current = project_version(pyproject, "pyproject.toml")
+
+          package_match = re.search(r'(?m)^__version__ = "([^"]+)"$', package)
+          if not package_match:
+              raise SystemExit("Could not find __version__ in src/gw/__init__.py")
+          if package_match.group(1) != str(current):
+              raise SystemExit(
+                  "Version mismatch: "
+                  f"pyproject.toml={current}, src/gw/__init__.py={package_match.group(1)}"
+              )
+
+          before_sha = os.environ["BEFORE_SHA"]
+          previous_text = subprocess.check_output(
+              ["git", "show", f"{before_sha}:pyproject.toml"], text=True
+          )
+          previous = project_version(previous_text, f"pyproject.toml at {before_sha}")
+          if current <= previous:
+              raise SystemExit(f"Version must increase on main: {previous} -> {current}")
+
+          tag = f"v{current}"
+          existing_tag = subprocess.check_output(["git", "tag", "--list", tag], text=True).strip()
+          if existing_tag:
+              raise SystemExit(f"Git tag {tag} already exists")
+
+          url = f"https://pypi.org/pypi/gwork/{current}/json"
+          try:
+              with urllib.request.urlopen(url):
+                  pass
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+          else:
+              raise SystemExit(f"gwork {current} is already published on PyPI")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              print(f"version={current}", file=output)
+          PY
+
+      - name: Run tests
+        run: |
+          python -m pip install .
+          python -m unittest discover -s tests
+          gwork --help
+          git-gwork --help
+
+      - name: Build and check distributions
+        run: |
+          python -m build
+          python -m twine check --strict dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+
+  tag:
+    name: Tag the release commit
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out the merged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push release tag
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "v$RELEASE_VERSION" --message "Release $RELEASE_VERSION"
+          git push origin "v$RELEASE_VERSION"
+
+  publish:
+    name: Publish distributions to PyPI
+    needs: [build, tag]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publish distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub Release
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "v$RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "gwork $RELEASE_VERSION"
