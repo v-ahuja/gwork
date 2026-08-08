@@ -22,12 +22,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-      - name: Run tests
-        run: python -m unittest discover -s tests
-      - name: Smoke check entry points
-        run: |
-          gwork --help
-          git-gwork --help
       - name: Install shells used by the helper syntax checks
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -36,6 +30,12 @@ jobs:
             # macOS runners already ship zsh.
             brew install fish
           fi
+      - name: Run tests
+        run: python -m unittest discover -s tests
+      - name: Smoke check entry points
+        run: |
+          gwork --help
+          git-gwork --help
       - name: Shell helper syntax
         run: |
           bash -n contrib/gwork.bash
