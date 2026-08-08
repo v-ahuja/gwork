@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import unittest
@@ -186,7 +187,7 @@ class GwCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertIn("gwork --install-shell-integration gw", result.stdout)
             self.assertIn("prompt interactively", result.stdout)
-            self.assertIn("gwork --print-shell-integration [zsh|bash]", result.stdout)
+            self.assertIn("gwork --print-shell-integration [zsh|bash|fish]", result.stdout)
             self.assertIn("--shell-integration-alias NAME", result.stdout)
 
     def test_print_shell_integration_can_infer_zsh_from_shell_env(self) -> None:
@@ -212,10 +213,141 @@ class GwCliTests(unittest.TestCase):
 
     def test_print_shell_integration_requires_supported_shell_when_not_provided(self) -> None:
         with tempfile_dir() as tmp_path:
-            result = run_gw(["--print-shell-integration"], tmp_path, env={"SHELL": "/bin/fish"})
+            result = run_gw(["--print-shell-integration"], tmp_path, env={"SHELL": "/bin/tcsh"})
 
             self.assertEqual(result.returncode, 1)
             self.assertIn("could not infer shell from $SHELL", result.stderr)
+
+    def test_print_shell_integration_rejects_unsupported_explicit_shell(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "tcsh"], tmp_path)
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("unsupported shell integration target 'tcsh'", result.stderr)
+
+    def test_print_shell_integration_supports_fish(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "fish"], tmp_path)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("function gw", result.stdout)
+            self.assertIn("set -l worktree_path (command gwork $argv)", result.stdout)
+            self.assertIn("set -l rc $status", result.stdout)
+            self.assertIn("complete -c gwork", result.stdout)
+            self.assertIn("complete -c gw -f -a '(_gw_complete)'", result.stdout)
+            self.assertEqual(result.stderr, "")
+
+    def test_fish_integration_avoids_posix_only_syntax(self) -> None:
+        """The fish helper must not contain bash/zsh constructs fish cannot parse."""
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "fish"], tmp_path)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertNotIn("[[", result.stdout)
+            self.assertNotIn("local ", result.stdout)
+            self.assertNotIn("$?", result.stdout)
+            self.assertNotIn("compdef", result.stdout)
+            self.assertNotIn("COMPREPLY", result.stdout)
+
+    def test_fish_integration_help_check_handles_leading_flags(self) -> None:
+        """`test` would misparse a leading -b/-d flag, so `contains` is required."""
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "fish"], tmp_path)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn('contains -- "$argv[1]" --help -h', result.stdout)
+
+    def test_print_shell_integration_can_infer_fish_from_shell_env(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(
+                ["--print-shell-integration"], tmp_path, env={"SHELL": "/opt/homebrew/bin/fish"}
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("function gw", result.stdout)
+            self.assertIn("complete -c gwork", result.stdout)
+            self.assertEqual(result.stderr, "")
+
+    @unittest.skipIf(shutil.which("fish") is None, "fish is not installed")
+    def test_fish_integration_parses_with_real_fish(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "fish"], tmp_path)
+            self.assertEqual(result.returncode, 0)
+
+            script = tmp_path / "gwork.fish"
+            script.write_text(result.stdout, encoding="utf-8")
+
+            parsed = subprocess.run(
+                ["fish", "--no-config", "-n", str(script)],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(parsed.returncode, 0, parsed.stderr)
+
+            sourced = subprocess.run(
+                ["fish", "--no-config", "-c", f"source {script}; functions -q gw; echo $status"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(sourced.returncode, 0, sourced.stderr)
+            self.assertEqual(sourced.stdout.strip(), "0")
+
+    @unittest.skipIf(shutil.which("fish") is None, "fish is not installed")
+    def test_fish_helper_cds_into_created_worktree(self) -> None:
+        """End-to-end: sourcing the helper in fish must change the shell directory."""
+        with tempfile_dir() as tmp_path:
+            repo = tmp_path / "repo"
+            repo.mkdir()
+            init_repo(repo)
+            base = tmp_path / "worktrees"
+            base.mkdir()
+
+            script = tmp_path / "gwork.fish"
+            printed = run_gw(["--print-shell-integration", "fish"], tmp_path)
+            script.write_text(printed.stdout, encoding="utf-8")
+
+            # Stand in for the installed `gwork` console script.
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            shim = bin_dir / "gwork"
+            shim.write_text(
+                f'#!/bin/sh\nexec "{sys.executable}" -m gw "$@"\n',
+                encoding="utf-8",
+            )
+            shim.chmod(0o755)
+
+            fish_script = (
+                f"set -x PYTHONPATH {ROOT / 'src'}; "
+                f"set -x PATH {bin_dir} $PATH; "
+                f"set -x BASE_WORKTREE {base}; "
+                f"source {script}; "
+                "gw -b feature/fish-e2e; "
+                "echo $PWD"
+            )
+            result = subprocess.run(
+                ["fish", "--no-config", "-c", fish_script],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                Path(result.stdout.strip()).resolve(),
+                (base / "repo" / "feature__fish-e2e").resolve(),
+            )
+
+    def test_print_shell_integration_fish_can_override_alias(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(
+                ["--print-shell-integration", "fish", "--shell-integration-alias", "gwork"],
+                tmp_path,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("function gwork", result.stdout)
+            self.assertNotIn("function gw\n", result.stdout)
+            self.assertEqual(result.stderr, "")
 
     def test_print_shell_integration_rejects_invalid_alias(self) -> None:
         with tempfile_dir() as tmp_path:
@@ -332,11 +464,84 @@ class GwCliTests(unittest.TestCase):
             result = run_gw(
                 ["--install-shell-integration", "gw"],
                 tmp_path,
-                env={"HOME": str(home), "SHELL": "/bin/fish"},
+                env={"HOME": str(home), "SHELL": "/bin/tcsh"},
             )
 
             self.assertEqual(result.returncode, 1)
             self.assertIn("could not infer shell from $SHELL", result.stderr)
+
+    def test_install_shell_integration_writes_fish_config(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+
+            result = run_gw(
+                ["--install-shell-integration", "gw"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/opt/homebrew/bin/fish"},
+            )
+
+            config = home / ".config" / "fish" / "config.fish"
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("installed shell integration", result.stderr)
+            self.assertTrue(config.is_file())
+
+            content = config.read_text(encoding="utf-8")
+            self.assertIn("# >>> gwork shell integration >>>", content)
+            self.assertIn("function gw", content)
+            self.assertIn("command gwork", content)
+            self.assertIn("complete -c gwork", content)
+
+    def test_install_shell_integration_fish_creates_missing_config_dirs(self) -> None:
+        """A fresh machine may have no ~/.config/fish directory yet."""
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+            self.assertFalse((home / ".config").exists())
+
+            result = run_gw(
+                ["--install-shell-integration", "gw"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/usr/local/bin/fish"},
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue((home / ".config" / "fish" / "config.fish").is_file())
+
+    def test_install_shell_integration_fish_is_idempotent(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            home.mkdir()
+            env = {"HOME": str(home), "SHELL": "/opt/homebrew/bin/fish"}
+
+            first = run_gw(["--install-shell-integration", "gw"], tmp_path, env=env)
+            second = run_gw(["--install-shell-integration", "gw"], tmp_path, env=env)
+
+            content = (home / ".config" / "fish" / "config.fish").read_text(encoding="utf-8")
+            self.assertEqual(first.returncode, 0)
+            self.assertEqual(second.returncode, 0)
+            self.assertEqual(content.count("# >>> gwork shell integration >>>"), 1)
+
+    def test_install_shell_integration_fish_preserves_existing_config(self) -> None:
+        with tempfile_dir() as tmp_path:
+            home = tmp_path / "home"
+            config = home / ".config" / "fish"
+            config.mkdir(parents=True)
+            (config / "config.fish").write_text(
+                'set -gx BASE_WORKTREE "$HOME/worktrees"\n', encoding="utf-8"
+            )
+
+            result = run_gw(
+                ["--install-shell-integration", "gw"],
+                tmp_path,
+                env={"HOME": str(home), "SHELL": "/opt/homebrew/bin/fish"},
+            )
+
+            content = (config / "config.fish").read_text(encoding="utf-8")
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue(content.startswith("set -gx BASE_WORKTREE"))
+            self.assertIn("function gw", content)
 
     def test_base_branch_mode_prunes_gone_branches(self) -> None:
         with tempfile_dir() as tmp_path:

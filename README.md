@@ -68,6 +68,13 @@ mkdir -p "$HOME/worktrees"
 export BASE_WORKTREE="$HOME/worktrees"
 ```
 
+In fish, use `set -Ux` instead of `export` (a universal variable persists across sessions, so it does not need to go in `config.fish`):
+
+```fish
+mkdir -p "$HOME/worktrees"
+set -Ux BASE_WORKTREE "$HOME/worktrees"
+```
+
 `BASE_WORKTREE` is required. `gwork` organizes worktrees under it by repository name.
 
 ## Usage
@@ -102,7 +109,15 @@ source <(gwork --print-shell-integration bash)
 source <(gwork --print-shell-integration zsh --shell-integration-alias gwork)
 ```
 
-`--install-shell-integration` appends a managed block to `~/.zshrc` or `~/.bashrc` and infers the shell from `$SHELL`. When you omit the alias, it prompts interactively and defaults to `gw` if you just hit Enter. Passing a name explicitly still works for scripting. `--shell-integration-alias` still applies to `--print-shell-integration` when you want to generate a different helper script without installing it.
+zsh, bash, and fish are supported.
+
+In fish, `<(...)` process substitution does not exist, so source the helper like this instead:
+
+```fish
+gwork --print-shell-integration fish | source
+```
+
+`--install-shell-integration` appends a managed block to `~/.zshrc`, `~/.bashrc`, or `~/.config/fish/config.fish` and infers the shell from `$SHELL`. Missing parent directories are created, so a fresh fish install works without any manual setup. When you omit the alias, it prompts interactively and defaults to `gw` if you just hit Enter. Passing a name explicitly still works for scripting. `--shell-integration-alias` still applies to `--print-shell-integration` when you want to generate a different helper script without installing it.
 
 The helper:
 

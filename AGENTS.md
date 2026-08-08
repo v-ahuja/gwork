@@ -54,6 +54,7 @@ Branch deletion semantics:
 
 - `gw --print-shell-integration zsh`
 - `gw --print-shell-integration bash`
+- `gw --print-shell-integration fish`
 
 These helpers:
 
@@ -62,7 +63,24 @@ These helpers:
 - `cd` into that path on success
 - install completion for `gw` and `git-gw`
 
-Checked-in copies also exist under [contrib/gwork.zsh](/Users/vina/software/gw/contrib/gwork.zsh) and [contrib/gwork.bash](/Users/vina/software/gw/contrib/gwork.bash), but installed-package users should prefer `--print-shell-integration`.
+Checked-in copies also exist under `contrib/gwork.zsh`, `contrib/gwork.bash`, and `contrib/gwork.fish`, but installed-package users should prefer `--print-shell-integration`. CI diffs the checked-in copies against generated output, so regenerate them when the templates change:
+
+```bash
+for shell in bash zsh fish; do
+  gwork --print-shell-integration "$shell" > "contrib/gwork.$shell"
+done
+```
+
+### fish specifics
+
+fish is not POSIX-compatible, so it needs its own template rather than reusing the bash one:
+
+- functions use `function ... end`, not `name() { ... }`
+- locals are `set -l`, and the exit status is `$status`, not `$?`
+- the help check uses `contains -- "$argv[1]" --help -h`; `test "$argv[1]" = "--help"` would misparse a leading `-b`/`-d`/`-D` flag as its own operator
+- completions use `complete -c`, with single-dash multi-character flags (`-new`, `-base`) registered as old-style options via `-o`
+- the rc file is `~/.config/fish/config.fish`, whose parent directories may not exist yet, so install creates them
+- fish has no `<(...)` process substitution; users source via `gwork --print-shell-integration fish | source`
 
 ## macOS-specific behavior
 
@@ -123,6 +141,8 @@ Covered scenarios include:
 - manual include copying
 - non-macOS rejection for `-new`
 - mocked macOS `osascript` execution
+- shell integration printing/installing for zsh, bash, and fish
+- fish helper parsing and `cd` behavior against the real `fish` binary (skipped when fish is absent)
 
 Run tests with:
 
