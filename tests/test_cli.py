@@ -237,6 +237,15 @@ class GwCliTests(unittest.TestCase):
             self.assertIn("complete -c gw -f -a '(_gw_complete)'", result.stdout)
             self.assertEqual(result.stderr, "")
 
+    def test_fish_completion_includes_co_only_for_first_argument(self) -> None:
+        with tempfile_dir() as tmp_path:
+            result = run_gw(["--print-shell-integration", "fish"], tmp_path)
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("set -l tokens (commandline -opc)", result.stdout)
+            self.assertIn("if test (count $tokens) -eq 1", result.stdout)
+            self.assertIn("echo co", result.stdout)
+
     def test_fish_integration_avoids_posix_only_syntax(self) -> None:
         """The fish helper must not contain bash/zsh constructs fish cannot parse."""
         with tempfile_dir() as tmp_path:

@@ -189,6 +189,10 @@ FISH_INTEGRATION_TEMPLATE = """function __ALIAS__
 end
 
 function _gw_complete
+  set -l tokens (commandline -opc)
+  if test (count $tokens) -eq 1
+    echo co
+  end
   git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null
   git for-each-ref --format='%(refname:lstrip=3)' refs/remotes/ 2>/dev/null \\
     | grep -v '^HEAD$' | sort -u
