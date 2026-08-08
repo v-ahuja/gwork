@@ -26,13 +26,13 @@ jobs:
 
     steps:
       - name: Check out main with tags
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -102,10 +102,10 @@ jobs:
           PY
 
           git diff --check
-          git diff --exit-code --quiet && {
+          if git diff --exit-code --quiet; then
             echo "The requested version produced no changes." >&2
             exit 1
-          }
+          fi
 
       - name: Install package and run tests
         run: |
