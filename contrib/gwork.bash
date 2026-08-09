@@ -1,19 +1,17 @@
 gw() {
-  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gwork --help
-    return $?
-  fi
-
   local worktree_path rc
   worktree_path="$(command gwork "$@")"
   rc=$?
 
   if [[ $rc -ne 0 ]]; then
+    [[ -n "$worktree_path" ]] && printf '%s\n' "$worktree_path"
     return "$rc"
   fi
 
   if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
     cd "$worktree_path" || return 1
+  elif [[ -n "$worktree_path" ]]; then
+    printf '%s\n' "$worktree_path"
   fi
 }
 
@@ -22,7 +20,7 @@ _gw_complete() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration --shell-integration-alias -new -b -base -d -D" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration --shell-integration-alias --version -v -new -b -base -d -D" -- "$cur") )
     return
   fi
 

@@ -15,6 +15,8 @@ import sys
 import tempfile
 import uuid
 
+from gw import __version__
+
 
 class NewMode(enum.Enum):
     TAB = "tab"
@@ -85,21 +87,19 @@ DEFAULT_SHELL_ALIAS = "gw"
 SHELL_FUNCTION_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 ZSH_INTEGRATION_TEMPLATE = """__ALIAS__() {
-  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command __COMMAND_NAME__ --help
-    return $?
-  fi
-
   local worktree_path rc
   worktree_path="$(command __COMMAND_NAME__ "$@")"
   rc=$?
 
   if (( rc != 0 )); then
+    [[ -n "$worktree_path" ]] && printf '%s\\n' "$worktree_path"
     return "$rc"
   fi
 
   if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
     cd "$worktree_path" || return 1
+  elif [[ -n "$worktree_path" ]]; then
+    printf '%s\\n' "$worktree_path"
   fi
 }
 
@@ -109,6 +109,8 @@ _gw_complete() {
       '--print-shell-integration:print shell helper script'
       '--install-shell-integration:append shell integration to your shell rc file'
       '--shell-integration-alias:override shell helper name for printed integration'
+      '--version:print version and exit'
+      '-v:print version and exit'
       '-new:open worktree in a new iTerm2 tab/window/split pane'
       '-b:create new branch and worktree'
       '-base:update base branch before creating a new branch'
@@ -144,21 +146,19 @@ _git_gwork() { _gw_complete "$@"; }
 """
 
 BASH_INTEGRATION_TEMPLATE = """__ALIAS__() {
-  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command __COMMAND_NAME__ --help
-    return $?
-  fi
-
   local worktree_path rc
   worktree_path="$(command __COMMAND_NAME__ "$@")"
   rc=$?
 
   if [[ $rc -ne 0 ]]; then
+    [[ -n "$worktree_path" ]] && printf '%s\\n' "$worktree_path"
     return "$rc"
   fi
 
   if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
     cd "$worktree_path" || return 1
+  elif [[ -n "$worktree_path" ]]; then
+    printf '%s\\n' "$worktree_path"
   fi
 }
 
@@ -167,7 +167,7 @@ _gw_complete() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   if [[ "$cur" == -* ]]; then
-    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration --shell-integration-alias -new -b -base -d -D" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--print-shell-integration --install-shell-integration --shell-integration-alias --version -v -new -b -base -d -D" -- "$cur") )
     return
   fi
 
@@ -181,26 +181,20 @@ __BASH_COMPLETION_DEFS__
 """
 
 FISH_INTEGRATION_TEMPLATE = """function __ALIAS__
-  # `contains` avoids `test`, which would parse a leading flag such as -b or -d
-  # in $argv[1] as one of its own operators.
-  if contains -- "$argv[1]" --help -h
-    command __COMMAND_NAME__ --help
-    return $status
-  end
-
   set -l worktree_path (command __COMMAND_NAME__ $argv)
   set -l rc $status
 
   if test $rc -ne 0
+    if test (count $worktree_path) -gt 0
+      printf '%s\\n' $worktree_path
+    end
     return $rc
   end
 
-  if test -z "$worktree_path"
-    return 0
-  end
-
-  if test -d "$worktree_path"
-    cd "$worktree_path"; or return 1
+  if test (count $worktree_path) -eq 1; and test -d "$worktree_path[1]"
+    cd "$worktree_path[1]"; or return 1
+  else if test (count $worktree_path) -gt 0
+    printf '%s\\n' $worktree_path
   end
 end
 
@@ -221,9 +215,11 @@ FISH_COMPLETION_FLAGS = [
     ("print-shell-integration", "print shell helper script"),
     ("install-shell-integration", "append shell integration to your shell rc file"),
     ("shell-integration-alias", "override shell helper name for printed integration"),
+    ("version", "print version and exit"),
 ]
 
 FISH_SHORT_FLAGS = [
+    ("v", "print version and exit"),
     ("new", "open worktree in a new iTerm2 tab/window/split pane"),
     ("b", "create new branch and worktree"),
     ("base", "update base branch before creating a new branch"),
@@ -865,6 +861,12 @@ Shell integration:
   gwork --print-shell-integration [zsh|bash|fish]
   gwork --print-shell-integration zsh --shell-integration-alias gw
 """,
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--print-shell-integration",

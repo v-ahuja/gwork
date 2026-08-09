@@ -1,19 +1,17 @@
 gw() {
-  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    command gwork --help
-    return $?
-  fi
-
   local worktree_path rc
   worktree_path="$(command gwork "$@")"
   rc=$?
 
   if (( rc != 0 )); then
+    [[ -n "$worktree_path" ]] && printf '%s\n' "$worktree_path"
     return "$rc"
   fi
 
   if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
     cd "$worktree_path" || return 1
+  elif [[ -n "$worktree_path" ]]; then
+    printf '%s\n' "$worktree_path"
   fi
 }
 
@@ -23,6 +21,8 @@ _gw_complete() {
       '--print-shell-integration:print shell helper script'
       '--install-shell-integration:append shell integration to your shell rc file'
       '--shell-integration-alias:override shell helper name for printed integration'
+      '--version:print version and exit'
+      '-v:print version and exit'
       '-new:open worktree in a new iTerm2 tab/window/split pane'
       '-b:create new branch and worktree'
       '-base:update base branch before creating a new branch'

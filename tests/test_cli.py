@@ -8,9 +8,10 @@ import sys
 import unittest
 from unittest import mock
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+
+from gw import __version__
 
 ENV = {
     **os.environ,
@@ -68,6 +69,16 @@ def make_remote_clone(root: Path) -> tuple[Path, Path]:
 
 
 class GwCliTests(unittest.TestCase):
+    def test_version_does_not_require_repo(self) -> None:
+        with tempfile_dir() as tmp_path:
+            for flag in ("-v", "--version"):
+                with self.subTest(flag=flag):
+                    result = run_gw([flag], tmp_path)
+
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, f"gwork {__version__}\n")
+                    self.assertEqual(result.stderr, "")
+
     def test_requires_base_worktree(self) -> None:
         with tempfile_dir() as tmp_path:
             repo = tmp_path / "repo"
@@ -219,6 +230,58 @@ class GwCliTests(unittest.TestCase):
             self.assertIn("complete -F _gw_complete gwork", result.stdout)
             self.assertEqual(result.stderr, "")
 
+    def test_bash_helper_prints_non_path_output(self) -> None:
+        with tempfile_dir() as tmp_path:
+            script = tmp_path / "gwork.bash"
+            printed = run_gw(["--print-shell-integration", "bash"], tmp_path)
+            script.write_text(printed.stdout, encoding="utf-8")
+
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            shim = bin_dir / "gwork"
+            shim.write_text(
+                f'#!/bin/sh\nexec "{sys.executable}" -m gw "$@"\n',
+                encoding="utf-8",
+            )
+            shim.chmod(0o755)
+
+            result = subprocess.run(
+                ["bash", "-c", f'source "{script}"; gw --version; gw --print-shell-integration bash'],
+                cwd=tmp_path,
+                env={**ENV, "PATH": f"{bin_dir}{os.pathsep}{ENV['PATH']}"},
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(result.stdout.startswith(f"gwork {__version__}\ngw() {{\n"))
+
+    def test_zsh_helper_prints_non_path_output(self) -> None:
+        with tempfile_dir() as tmp_path:
+            script = tmp_path / "gwork.zsh"
+            printed = run_gw(["--print-shell-integration", "zsh"], tmp_path)
+            script.write_text(printed.stdout, encoding="utf-8")
+
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            shim = bin_dir / "gwork"
+            shim.write_text(
+                f'#!/bin/sh\nexec "{sys.executable}" -m gw "$@"\n',
+                encoding="utf-8",
+            )
+            shim.chmod(0o755)
+
+            result = subprocess.run(
+                ["zsh", "-c", f'autoload -Uz compinit && compinit; source "{script}"; gw --version'],
+                cwd=tmp_path,
+                env={**ENV, "PATH": f"{bin_dir}{os.pathsep}{ENV['PATH']}"},
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, f"gwork {__version__}\n")
+
     def test_help_mentions_shell_integration_install_and_print(self) -> None:
         with tempfile_dir() as tmp_path:
             result = run_gw(["--help"], tmp_path)
@@ -297,13 +360,13 @@ class GwCliTests(unittest.TestCase):
             self.assertNotIn("compdef", result.stdout)
             self.assertNotIn("COMPREPLY", result.stdout)
 
-    def test_fish_integration_help_check_handles_leading_flags(self) -> None:
-        """`test` would misparse a leading -b/-d flag, so `contains` is required."""
+    def test_fish_integration_prints_non_path_output(self) -> None:
         with tempfile_dir() as tmp_path:
             result = run_gw(["--print-shell-integration", "fish"], tmp_path)
 
             self.assertEqual(result.returncode, 0)
-            self.assertIn('contains -- "$argv[1]" --help -h', result.stdout)
+            self.assertIn("else if test (count $worktree_path) -gt 0", result.stdout)
+            self.assertIn("printf '%s\\n' $worktree_path", result.stdout)
 
     def test_print_shell_integration_can_infer_fish_from_shell_env(self) -> None:
         with tempfile_dir() as tmp_path:
@@ -369,6 +432,7 @@ class GwCliTests(unittest.TestCase):
                 f"set -x PATH {bin_dir} $PATH; "
                 f"set -x BASE_WORKTREE {base}; "
                 f"source {script}; "
+                "gw --version; "
                 "gw -b feature/fish-e2e; "
                 "echo $PWD"
             )
@@ -380,8 +444,10 @@ class GwCliTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
+            output_lines = result.stdout.splitlines()
+            self.assertEqual(output_lines[0], f"gwork {__version__}")
             self.assertEqual(
-                Path(result.stdout.strip()).resolve(),
+                Path(output_lines[-1]).resolve(),
                 (base / "repo" / "feature__fish-e2e").resolve(),
             )
 
