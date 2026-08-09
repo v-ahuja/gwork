@@ -1,24 +1,18 @@
 function gw
-  # `contains` avoids `test`, which would parse a leading flag such as -b or -d
-  # in $argv[1] as one of its own operators.
-  if contains -- "$argv[1]" --help -h
-    command gwork --help
-    return $status
-  end
-
   set -l worktree_path (command gwork $argv)
   set -l rc $status
 
   if test $rc -ne 0
+    if test (count $worktree_path) -gt 0
+      printf '%s\n' $worktree_path
+    end
     return $rc
   end
 
-  if test -z "$worktree_path"
-    return 0
-  end
-
-  if test -d "$worktree_path"
-    cd "$worktree_path"; or return 1
+  if test (count $worktree_path) -eq 1; and test -d "$worktree_path[1]"
+    cd "$worktree_path[1]"; or return 1
+  else if test (count $worktree_path) -gt 0
+    printf '%s\n' $worktree_path
   end
 end
 
@@ -35,6 +29,8 @@ end
 complete -c gw -l print-shell-integration -d 'print shell helper script'
 complete -c gw -l install-shell-integration -d 'append shell integration to your shell rc file'
 complete -c gw -l shell-integration-alias -d 'override shell helper name for printed integration'
+complete -c gw -l version -d 'print version and exit'
+complete -c gw -o v -d 'print version and exit'
 complete -c gw -o new -d 'open worktree in a new iTerm2 tab/window/split pane'
 complete -c gw -o b -d 'create new branch and worktree'
 complete -c gw -o base -d 'update base branch before creating a new branch'
@@ -44,6 +40,8 @@ complete -c gw -f -a '(_gw_complete)' -d 'branch'
 complete -c gwork -l print-shell-integration -d 'print shell helper script'
 complete -c gwork -l install-shell-integration -d 'append shell integration to your shell rc file'
 complete -c gwork -l shell-integration-alias -d 'override shell helper name for printed integration'
+complete -c gwork -l version -d 'print version and exit'
+complete -c gwork -o v -d 'print version and exit'
 complete -c gwork -o new -d 'open worktree in a new iTerm2 tab/window/split pane'
 complete -c gwork -o b -d 'create new branch and worktree'
 complete -c gwork -o base -d 'update base branch before creating a new branch'
@@ -53,6 +51,8 @@ complete -c gwork -f -a '(_gw_complete)' -d 'branch'
 complete -c git-gwork -l print-shell-integration -d 'print shell helper script'
 complete -c git-gwork -l install-shell-integration -d 'append shell integration to your shell rc file'
 complete -c git-gwork -l shell-integration-alias -d 'override shell helper name for printed integration'
+complete -c git-gwork -l version -d 'print version and exit'
+complete -c git-gwork -o v -d 'print version and exit'
 complete -c git-gwork -o new -d 'open worktree in a new iTerm2 tab/window/split pane'
 complete -c git-gwork -o b -d 'create new branch and worktree'
 complete -c git-gwork -o base -d 'update base branch before creating a new branch'
